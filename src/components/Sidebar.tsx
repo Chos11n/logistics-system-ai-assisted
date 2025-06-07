@@ -11,7 +11,7 @@ const Sidebar: React.FC<SidebarProps> = ({ activePage, setActivePage }) => {
     <div className="w-64 bg-blue-900 text-white h-screen flex flex-col shadow-lg">
       <div className="p-4 border-b border-blue-800">
         <h1 className="text-lg font-bold flex items-center">
-          <Truck className="mr-2" size={24} />
+          <Truck className="mr-2\" size={24} />
           环亚物流管理系统
         </h1>
       </div>
