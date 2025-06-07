@@ -7,7 +7,7 @@ import { Trash2 } from 'lucide-react';
 import * as XLSX from 'xlsx';
 
 const HistoryPage: React.FC = () => {
-  const { historyItems, undoShipment } = useCargo();
+  const { historyItems, undoShipment, refreshData } = useCargo();
   const { user } = useAuth();
   const [searchTerm, setSearchTerm] = useState('');
   const [searchUrgent, setSearchUrgent] = useState<'all' | 'urgent' | 'normal'>('all');
@@ -15,6 +15,7 @@ const HistoryPage: React.FC = () => {
   const [isBatchMode, setIsBatchMode] = useState(false);
   const [selectedItems, setSelectedItems] = useState<Set<string>>(new Set());
   const [showClearConfirm, setShowClearConfirm] = useState(false);
+  const [isClearing, setIsClearing] = useState(false);
 
   // Group items by date
   const groupedItems = useMemo(() => {
@@ -105,11 +106,38 @@ const HistoryPage: React.FC = () => {
     XLSX.writeFile(workbook, '历史货物清单.xlsx');
   };
 
-  const handleClearAllHistory = () => {
-    // Clear from localStorage
-    localStorage.removeItem('historyItems');
-    // Force page reload to refresh data
-    window.location.reload();
+  const handleClearAllHistory = async () => {
+    setIsClearing(true);
+    try {
+      // 清空localStorage
+      localStorage.removeItem('historyItems');
+      
+      // 尝试清空服务器数据库中的已发货货物
+      try {
+        const response = await fetch('http://localhost:3001/api/cargo/clear-shipped', {
+          method: 'DELETE',
+          headers: {
+            'Content-Type': 'application/json',
+          },
+        });
+        
+        if (!response.ok) {
+          console.warn('服务器清空失败，但本地数据已清空');
+        }
+      } catch (error) {
+        console.warn('无法连接到服务器，仅清空本地数据');
+      }
+      
+      // 刷新数据
+      await refreshData();
+      
+      alert('历史记录已清空');
+    } catch (error) {
+      console.error('清空历史记录失败:', error);
+      alert('清空失败，请重试');
+    } finally {
+      setIsClearing(false);
+    }
   };
 
   return (
@@ -152,9 +180,10 @@ const HistoryPage: React.FC = () => {
             <button
               onClick={() => setShowClearConfirm(true)}
               className="btn-danger flex items-center gap-2"
+              disabled={isClearing}
             >
               <Trash2 size={16} />
-              清空所有历史记录
+              {isClearing ? '清空中...' : '清空所有历史记录'}
             </button>
           )}
           
@@ -315,6 +344,7 @@ const HistoryPage: React.FC = () => {
                 <li>• 共 {historyItems.length} 条历史记录</li>
                 <li>• 所有已送出的货物信息</li>
                 <li>• 相关的装车记录</li>
+                <li>• 服务器数据库中的对应数据</li>
               </ul>
               <div className="mt-4 p-3 bg-red-50 border border-red-200 rounded">
                 <p className="text-red-800 text-sm font-medium">
@@ -327,6 +357,7 @@ const HistoryPage: React.FC = () => {
               <button
                 onClick={() => setShowClearConfirm(false)}
                 className="btn-secondary"
+                disabled={isClearing}
               >
                 取消
               </button>
@@ -336,8 +367,9 @@ const HistoryPage: React.FC = () => {
                   setShowClearConfirm(false);
                 }}
                 className="btn-danger"
+                disabled={isClearing}
               >
-                确认清空
+                {isClearing ? '清空中...' : '确认清空'}
               </button>
             </div>
           </div>

@@ -265,6 +265,34 @@ app.delete('/api/cargo/:id', async (req, res) => {
   }
 });
 
+// Clear all warehouse cargo
+app.delete('/api/cargo/clear-warehouse', async (req, res) => {
+  try {
+    const result = await dbRun('DELETE FROM cargo WHERE status = ?', ['warehouse']);
+    res.json({ 
+      message: 'Warehouse cleared successfully', 
+      deletedCount: result.changes 
+    });
+  } catch (error) {
+    console.error('Error clearing warehouse:', error);
+    res.status(500).json({ error: 'Failed to clear warehouse' });
+  }
+});
+
+// Clear all shipped cargo
+app.delete('/api/cargo/clear-shipped', async (req, res) => {
+  try {
+    const result = await dbRun('DELETE FROM cargo WHERE status = ?', ['shipped']);
+    res.json({ 
+      message: 'Shipped cargo cleared successfully', 
+      deletedCount: result.changes 
+    });
+  } catch (error) {
+    console.error('Error clearing shipped cargo:', error);
+    res.status(500).json({ error: 'Failed to clear shipped cargo' });
+  }
+});
+
 // Get all trucks with their cargo
 app.get('/api/trucks', async (req, res) => {
   try {
@@ -284,6 +312,25 @@ app.get('/api/trucks', async (req, res) => {
   } catch (error) {
     console.error('Error fetching trucks:', error);
     res.status(500).json({ error: 'Failed to fetch trucks' });
+  }
+});
+
+// Clear all truck records
+app.delete('/api/trucks/clear-all', async (req, res) => {
+  try {
+    // Delete truck-cargo relationships first
+    await dbRun('DELETE FROM truck_cargo');
+    
+    // Delete trucks
+    const result = await dbRun('DELETE FROM trucks');
+    
+    res.json({ 
+      message: 'All truck records cleared successfully', 
+      deletedCount: result.changes 
+    });
+  } catch (error) {
+    console.error('Error clearing truck records:', error);
+    res.status(500).json({ error: 'Failed to clear truck records' });
   }
 });
 

@@ -6,16 +6,44 @@ import { zhCN } from 'date-fns/locale';
 import { Trash2 } from 'lucide-react';
 
 const TrucksPage: React.FC = () => {
-  const { truckItems } = useCargo();
+  const { truckItems, refreshData } = useCargo();
   const { user } = useAuth();
   const [selectedTruck, setSelectedTruck] = useState<string | null>(null);
   const [showClearConfirm, setShowClearConfirm] = useState(false);
+  const [isClearing, setIsClearing] = useState(false);
 
-  const handleClearAllTrucks = () => {
-    // Clear from localStorage
-    localStorage.removeItem('truckItems');
-    // Force page reload to refresh data
-    window.location.reload();
+  const handleClearAllTrucks = async () => {
+    setIsClearing(true);
+    try {
+      // 清空localStorage
+      localStorage.removeItem('truckItems');
+      
+      // 尝试清空服务器数据库中的装车记录
+      try {
+        const response = await fetch('http://localhost:3001/api/trucks/clear-all', {
+          method: 'DELETE',
+          headers: {
+            'Content-Type': 'application/json',
+          },
+        });
+        
+        if (!response.ok) {
+          console.warn('服务器清空失败，但本地数据已清空');
+        }
+      } catch (error) {
+        console.warn('无法连接到服务器，仅清空本地数据');
+      }
+      
+      // 刷新数据
+      await refreshData();
+      
+      alert('装车记录已清空');
+    } catch (error) {
+      console.error('清空装车记录失败:', error);
+      alert('清空失败，请重试');
+    } finally {
+      setIsClearing(false);
+    }
   };
 
   return (
@@ -30,9 +58,10 @@ const TrucksPage: React.FC = () => {
           <button
             onClick={() => setShowClearConfirm(true)}
             className="btn-danger flex items-center gap-2"
+            disabled={isClearing}
           >
             <Trash2 size={16} />
-            清空所有装车记录
+            {isClearing ? '清空中...' : '清空所有装车记录'}
           </button>
         )}
       </header>
@@ -138,6 +167,7 @@ const TrucksPage: React.FC = () => {
                 <li>• 共 {truckItems.length} 条装车记录</li>
                 <li>• 所有货车的装载信息</li>
                 <li>• 相关的货物装载历史</li>
+                <li>• 服务器数据库中的对应数据</li>
               </ul>
               <div className="mt-4 p-3 bg-red-50 border border-red-200 rounded">
                 <p className="text-red-800 text-sm font-medium">
@@ -150,6 +180,7 @@ const TrucksPage: React.FC = () => {
               <button
                 onClick={() => setShowClearConfirm(false)}
                 className="btn-secondary"
+                disabled={isClearing}
               >
                 取消
               </button>
@@ -159,8 +190,9 @@ const TrucksPage: React.FC = () => {
                   setShowClearConfirm(false);
                 }}
                 className="btn-danger"
+                disabled={isClearing}
               >
-                确认清空
+                {isClearing ? '清空中...' : '确认清空'}
               </button>
             </div>
           </div>
