@@ -1,16 +1,20 @@
 import React, { useState, useMemo } from 'react';
 import { useCargo } from '../context/CargoContext';
+import { useAuth } from '../context/AuthContext';
 import { format } from 'date-fns';
 import { zhCN } from 'date-fns/locale';
+import { Trash2 } from 'lucide-react';
 import * as XLSX from 'xlsx';
 
 const HistoryPage: React.FC = () => {
   const { historyItems, undoShipment } = useCargo();
+  const { user } = useAuth();
   const [searchTerm, setSearchTerm] = useState('');
   const [searchUrgent, setSearchUrgent] = useState<'all' | 'urgent' | 'normal'>('all');
   const [confirmUndoId, setConfirmUndoId] = useState<string | null>(null);
   const [isBatchMode, setIsBatchMode] = useState(false);
   const [selectedItems, setSelectedItems] = useState<Set<string>>(new Set());
+  const [showClearConfirm, setShowClearConfirm] = useState(false);
 
   // Group items by date
   const groupedItems = useMemo(() => {
@@ -101,6 +105,13 @@ const HistoryPage: React.FC = () => {
     XLSX.writeFile(workbook, '历史货物清单.xlsx');
   };
 
+  const handleClearAllHistory = () => {
+    // Clear from localStorage
+    localStorage.removeItem('historyItems');
+    // Force page reload to refresh data
+    window.location.reload();
+  };
+
   return (
     <div className="p-6 max-w-6xl mx-auto slide-in">
       <header className="mb-6">
@@ -137,6 +148,16 @@ const HistoryPage: React.FC = () => {
         </div>
         
         <div className="flex gap-2">
+          {user?.role === 'admin' && historyItems.length > 0 && (
+            <button
+              onClick={() => setShowClearConfirm(true)}
+              className="btn-danger flex items-center gap-2"
+            >
+              <Trash2 size={16} />
+              清空所有历史记录
+            </button>
+          )}
+          
           <button
             onClick={() => {
               setIsBatchMode(!isBatchMode);
@@ -275,6 +296,52 @@ const HistoryPage: React.FC = () => {
             </div>
           )}
         </>
+      )}
+
+      {/* 清空确认对话框 */}
+      {showClearConfirm && (
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
+          <div className="bg-white rounded-lg p-6 max-w-md w-full mx-4">
+            <h3 className="text-lg font-semibold text-red-900 mb-4 flex items-center gap-2">
+              <Trash2 size={20} />
+              确认清空所有历史记录
+            </h3>
+            
+            <div className="mb-6">
+              <p className="text-gray-700 mb-3">
+                此操作将永久删除所有历史货物记录，包括：
+              </p>
+              <ul className="text-sm text-gray-600 space-y-1 ml-4">
+                <li>• 共 {historyItems.length} 条历史记录</li>
+                <li>• 所有已送出的货物信息</li>
+                <li>• 相关的装车记录</li>
+              </ul>
+              <div className="mt-4 p-3 bg-red-50 border border-red-200 rounded">
+                <p className="text-red-800 text-sm font-medium">
+                  ⚠️ 此操作不可撤销，请谨慎操作！
+                </p>
+              </div>
+            </div>
+            
+            <div className="flex gap-3 justify-end">
+              <button
+                onClick={() => setShowClearConfirm(false)}
+                className="btn-secondary"
+              >
+                取消
+              </button>
+              <button
+                onClick={() => {
+                  handleClearAllHistory();
+                  setShowClearConfirm(false);
+                }}
+                className="btn-danger"
+              >
+                确认清空
+              </button>
+            </div>
+          </div>
+        </div>
       )}
     </div>
   );

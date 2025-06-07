@@ -1,19 +1,22 @@
 import React, { useState, useMemo } from 'react';
 import { useCargo } from '../context/CargoContext';
+import { useAuth } from '../context/AuthContext';
 import { format } from 'date-fns';
 import { zhCN } from 'date-fns/locale';
 import { Truck as TruckType, Customer, calculateCargoPriority } from '../types/CargoTypes';
-import { AlertTriangle, Truck, Clock } from 'lucide-react';
+import { AlertTriangle, Truck, Clock, Trash2 } from 'lucide-react';
 import * as XLSX from 'xlsx';
 
 const WarehousePage: React.FC = () => {
   const { warehouseItems, loadToTruck } = useCargo();
+  const { user } = useAuth();
   const [searchTerm, setSearchTerm] = useState('');
   const [searchUrgent, setSearchUrgent] = useState<'all' | 'urgent' | 'normal'>('all');
   const [selectedItems, setSelectedItems] = useState<Set<string>>(new Set());
   const [hoveredItem, setHoveredItem] = useState<string | null>(null);
   const [showSmartLoadDialog, setShowSmartLoadDialog] = useState(false);
   const [showEmergencyPage, setShowEmergencyPage] = useState(false);
+  const [showClearConfirm, setShowClearConfirm] = useState(false);
   const [loadingPlan, setLoadingPlan] = useState<any[]>([]);
   const [trucks, setTrucks] = useState<TruckType[]>([]);
   const [customers, setCustomers] = useState<Customer[]>([]);
@@ -234,6 +237,13 @@ const WarehousePage: React.FC = () => {
     XLSX.writeFile(workbook, '仓库货物清单.xlsx');
   };
 
+  const handleClearAllWarehouse = () => {
+    // Clear from localStorage
+    localStorage.removeItem('warehouseItems');
+    // Force page reload to refresh data
+    window.location.reload();
+  };
+
   const getCustomerInfo = (customerId?: string) => {
     if (!customerId) return null;
     return customers.find(c => c.id === customerId);
@@ -243,7 +253,7 @@ const WarehousePage: React.FC = () => {
     const indicators = [];
     
     if (cargo.urgent) {
-      indicators.push(<span key="urgent\" className="text-red-600 font-bold">🚨 急货</span>);
+      indicators.push(<span key="urgent" className="text-red-600 font-bold">🚨 急货</span>);
     }
     
     if (cargo.isCarryOver) {
@@ -355,6 +365,16 @@ const WarehousePage: React.FC = () => {
         </div>
         
         <div className="flex gap-2">
+          {user?.role === 'admin' && warehouseItems.length > 0 && (
+            <button
+              onClick={() => setShowClearConfirm(true)}
+              className="btn-danger flex items-center gap-2"
+            >
+              <Trash2 size={16} />
+              清空仓库
+            </button>
+          )}
+          
           <button
             onClick={() => setShowEmergencyPage(true)}
             className="btn-warning flex items-center gap-2"
@@ -596,6 +616,52 @@ const WarehousePage: React.FC = () => {
             </div>
           )}
         </>
+      )}
+
+      {/* 清空确认对话框 */}
+      {showClearConfirm && (
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
+          <div className="bg-white rounded-lg p-6 max-w-md w-full mx-4">
+            <h3 className="text-lg font-semibold text-red-900 mb-4 flex items-center gap-2">
+              <Trash2 size={20} />
+              确认清空仓库
+            </h3>
+            
+            <div className="mb-6">
+              <p className="text-gray-700 mb-3">
+                此操作将永久删除仓库中的所有货物，包括：
+              </p>
+              <ul className="text-sm text-gray-600 space-y-1 ml-4">
+                <li>• 共 {warehouseItems.length} 件货物</li>
+                <li>• 所有待装车的货物信息</li>
+                <li>• 相关的客户关联信息</li>
+              </ul>
+              <div className="mt-4 p-3 bg-red-50 border border-red-200 rounded">
+                <p className="text-red-800 text-sm font-medium">
+                  ⚠️ 此操作不可撤销，请谨慎操作！
+                </p>
+              </div>
+            </div>
+            
+            <div className="flex gap-3 justify-end">
+              <button
+                onClick={() => setShowClearConfirm(false)}
+                className="btn-secondary"
+              >
+                取消
+              </button>
+              <button
+                onClick={() => {
+                  handleClearAllWarehouse();
+                  setShowClearConfirm(false);
+                }}
+                className="btn-danger"
+              >
+                确认清空
+              </button>
+            </div>
+          </div>
+        </div>
       )}
     </div>
   );
