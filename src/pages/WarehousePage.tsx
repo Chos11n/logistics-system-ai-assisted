@@ -241,10 +241,10 @@ const WarehousePage: React.FC = () => {
   const handleClearAllWarehouse = async () => {
     setIsClearing(true);
     try {
-      // 清空localStorage
-      localStorage.removeItem('warehouseItems');
+      console.log('开始清空仓库操作...');
       
-      // 尝试清空服务器数据库中的仓库货物
+      // 先尝试清空服务器数据库
+      let serverCleared = false;
       try {
         const response = await fetch('http://localhost:3001/api/cargo/clear-warehouse', {
           method: 'DELETE',
@@ -253,17 +253,37 @@ const WarehousePage: React.FC = () => {
           },
         });
         
-        if (!response.ok) {
-          console.warn('服务器清空失败，但本地数据已清空');
+        if (response.ok) {
+          console.log('服务器仓库数据已清空');
+          serverCleared = true;
+        } else {
+          const errorData = await response.json();
+          console.warn('服务器清空失败:', errorData);
         }
       } catch (error) {
-        console.warn('无法连接到服务器，仅清空本地数据');
+        console.warn('无法连接到服务器，将仅清空本地数据:', error);
       }
       
-      // 刷新数据
+      // 清空所有相关的localStorage数据
+      console.log('清空本地存储数据...');
+      localStorage.removeItem('warehouseItems');
+      localStorage.removeItem('historyItems');
+      localStorage.removeItem('truckItems');
+      
+      // 强制刷新数据
+      console.log('刷新应用数据...');
       await refreshData();
       
-      alert('仓库已清空');
+      // 清空当前选择状态
+      setSelectedItems(new Set());
+      
+      if (serverCleared) {
+        alert('仓库已成功清空（包括服务器数据）');
+      } else {
+        alert('仓库本地数据已清空，服务器数据清空失败');
+      }
+      
+      console.log('仓库清空操作完成');
     } catch (error) {
       console.error('清空仓库失败:', error);
       alert('清空失败，请重试');
@@ -281,7 +301,7 @@ const WarehousePage: React.FC = () => {
     const indicators = [];
     
     if (cargo.urgent) {
-      indicators.push(<span key="urgent\" className="text-red-600 font-bold">🚨 急货</span>);
+      indicators.push(<span key="urgent" className="text-red-600 font-bold">🚨 急货</span>);
     }
     
     if (cargo.isCarryOver) {

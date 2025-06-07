@@ -16,6 +16,7 @@ interface CargoContextType {
   refreshData: () => Promise<void>;
   checkServerHealth: () => Promise<void>;
   markAsCarryOver: (cargoIds: string[]) => void;
+  clearAllData: () => Promise<void>;
 }
 
 const CargoContext = createContext<CargoContextType | undefined>(undefined);
@@ -64,6 +65,23 @@ export const CargoProvider: React.FC<CargoProviderProps> = ({ children }) => {
     );
   };
 
+  // 清空所有数据
+  const clearAllData = async () => {
+    console.log('开始清空所有数据...');
+    
+    // 清空状态
+    setWarehouseItems([]);
+    setHistoryItems([]);
+    setTruckItems([]);
+    
+    // 清空localStorage
+    localStorage.removeItem('warehouseItems');
+    localStorage.removeItem('historyItems');
+    localStorage.removeItem('truckItems');
+    
+    console.log('所有数据已清空');
+  };
+
   // Load data from API with better error handling
   const refreshData = async () => {
     setLoading(true);
@@ -110,16 +128,19 @@ export const CargoProvider: React.FC<CargoProviderProps> = ({ children }) => {
         const storedTrucks = localStorage.getItem('truckItems');
 
         if (storedWarehouse) {
-          setWarehouseItems(JSON.parse(storedWarehouse));
-          console.log('📦 Loaded warehouse data from localStorage');
+          const warehouseData = JSON.parse(storedWarehouse);
+          setWarehouseItems(warehouseData);
+          console.log('📦 Loaded warehouse data from localStorage:', warehouseData.length, 'items');
         }
         if (storedHistory) {
-          setHistoryItems(JSON.parse(storedHistory));
-          console.log('📋 Loaded history data from localStorage');
+          const historyData = JSON.parse(storedHistory);
+          setHistoryItems(historyData);
+          console.log('📋 Loaded history data from localStorage:', historyData.length, 'items');
         }
         if (storedTrucks) {
-          setTruckItems(JSON.parse(storedTrucks));
-          console.log('🚛 Loaded truck data from localStorage');
+          const truckData = JSON.parse(storedTrucks);
+          setTruckItems(truckData);
+          console.log('🚛 Loaded truck data from localStorage:', truckData.length, 'items');
         }
       } catch (storageError) {
         console.error('Failed to load from localStorage:', storageError);
@@ -150,6 +171,7 @@ export const CargoProvider: React.FC<CargoProviderProps> = ({ children }) => {
       localStorage.setItem('warehouseItems', JSON.stringify(warehouseItems));
       localStorage.setItem('historyItems', JSON.stringify(historyItems));
       localStorage.setItem('truckItems', JSON.stringify(truckItems));
+      console.log('💾 Data backed up to localStorage');
     } catch (err) {
       console.error('Failed to save to localStorage:', err);
     }
@@ -292,7 +314,8 @@ export const CargoProvider: React.FC<CargoProviderProps> = ({ children }) => {
       undoShipment,
       refreshData,
       checkServerHealth,
-      markAsCarryOver
+      markAsCarryOver,
+      clearAllData
     }}>
       {children}
     </CargoContext.Provider>
