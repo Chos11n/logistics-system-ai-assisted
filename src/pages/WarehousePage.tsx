@@ -8,7 +8,7 @@ import { AlertTriangle, Truck, Clock, Trash2 } from 'lucide-react';
 import * as XLSX from 'xlsx';
 
 const WarehousePage: React.FC = () => {
-  const { warehouseItems, loadToTruck, refreshData } = useCargo();
+  const { warehouseItems, loadToTruck, refreshData, clearAllData } = useCargo();
   const { user } = useAuth();
   const [searchTerm, setSearchTerm] = useState('');
   const [searchUrgent, setSearchUrgent] = useState<'all' | 'urgent' | 'normal'>('all');
@@ -18,6 +18,7 @@ const WarehousePage: React.FC = () => {
   const [showEmergencyPage, setShowEmergencyPage] = useState(false);
   const [showClearConfirm, setShowClearConfirm] = useState(false);
   const [isClearing, setIsClearing] = useState(false);
+  const [clearingStatus, setClearingStatus] = useState<string>('');
   const [loadingPlan, setLoadingPlan] = useState<any[]>([]);
   const [trucks, setTrucks] = useState<TruckType[]>([]);
   const [customers, setCustomers] = useState<Customer[]>([]);
@@ -240,12 +241,20 @@ const WarehousePage: React.FC = () => {
 
   const handleClearAllWarehouse = async () => {
     setIsClearing(true);
+    setClearingStatus('开始清空操作...');
+    
     try {
-      console.log('开始清空仓库操作...');
+      console.log('🗑️ 开始清空仓库操作...');
+      console.log('📦 当前仓库货物数量:', warehouseItems.length);
+      
+      setClearingStatus('正在清空服务器数据...');
       
       // 先尝试清空服务器数据库
       let serverCleared = false;
+      let serverError = null;
+      
       try {
+        console.log('🌐 发送服务器清空请求...');
         const response = await fetch('http://localhost:3001/api/cargo/clear-warehouse', {
           method: 'DELETE',
           headers: {
@@ -253,42 +262,59 @@ const WarehousePage: React.FC = () => {
           },
         });
         
+        console.log('📡 服务器响应状态:', response.status);
+        
         if (response.ok) {
-          console.log('服务器仓库数据已清空');
+          const result = await response.json();
+          console.log('✅ 服务器响应成功:', result);
           serverCleared = true;
+          setClearingStatus('服务器数据已清空，正在清空本地数据...');
         } else {
           const errorData = await response.json();
-          console.warn('服务器清空失败:', errorData);
+          console.error('❌ 服务器清空失败:', errorData);
+          serverError = errorData;
+          setClearingStatus('服务器清空失败，继续清空本地数据...');
         }
       } catch (error) {
-        console.warn('无法连接到服务器，将仅清空本地数据:', error);
+        console.error('❌ 服务器连接失败:', error);
+        serverError = error;
+        setClearingStatus('无法连接服务器，清空本地数据...');
       }
       
-      // 清空所有相关的localStorage数据
-      console.log('清空本地存储数据...');
-      localStorage.removeItem('warehouseItems');
-      localStorage.removeItem('historyItems');
-      localStorage.removeItem('truckItems');
+      // 清空本地数据
+      console.log('💾 清空本地存储数据...');
+      setClearingStatus('正在清空本地数据...');
       
-      // 强制刷新数据
-      console.log('刷新应用数据...');
-      await refreshData();
+      // 使用 context 的清空方法
+      await clearAllData();
       
       // 清空当前选择状态
       setSelectedItems(new Set());
       
+      // 强制刷新数据
+      console.log('🔄 刷新应用数据...');
+      setClearingStatus('正在刷新数据...');
+      await refreshData();
+      
+      setClearingStatus('清空完成！');
+      
+      // 显示结果
       if (serverCleared) {
-        alert('仓库已成功清空（包括服务器数据）');
+        alert('✅ 仓库已成功清空（包括服务器数据）');
       } else {
-        alert('仓库本地数据已清空，服务器数据清空失败');
+        const errorMsg = serverError?.details || serverError?.message || '未知错误';
+        alert(`⚠️ 仓库本地数据已清空，但服务器清空失败：${errorMsg}`);
+        console.error('服务器清空详细错误:', serverError);
       }
       
-      console.log('仓库清空操作完成');
+      console.log('✅ 仓库清空操作完成');
     } catch (error) {
-      console.error('清空仓库失败:', error);
-      alert('清空失败，请重试');
+      console.error('❌ 清空仓库失败:', error);
+      setClearingStatus('清空失败！');
+      alert(`❌ 清空失败：${error.message}`);
     } finally {
       setIsClearing(false);
+      setClearingStatus('');
     }
   };
 
@@ -301,7 +327,7 @@ const WarehousePage: React.FC = () => {
     const indicators = [];
     
     if (cargo.urgent) {
-      indicators.push(<span key="urgent\" className="text-red-600 font-bold">🚨 急货</span>);
+      indicators.push(<span key="urgent" className="text-red-600 font-bold">🚨 急货</span>);
     }
     
     if (cargo.isCarryOver) {
@@ -420,7 +446,7 @@ const WarehousePage: React.FC = () => {
               disabled={isClearing}
             >
               <Trash2 size={16} />
-              {isClearing ? '清空中...' : '清空仓库'}
+              {isClearing ? clearingStatus || '清空中...' : '清空仓库'}
             </button>
           )}
           
@@ -691,6 +717,15 @@ const WarehousePage: React.FC = () => {
                   ⚠️ 此操作不可撤销，请谨慎操作！
                 </p>
               </div>
+              
+              {/* 显示清空状态 */}
+              {clearingStatus && (
+                <div className="mt-3 p-2 bg-blue-50 border border-blue-200 rounded">
+                  <p className="text-blue-800 text-sm">
+                    🔄 {clearingStatus}
+                  </p>
+                </div>
+              )}
             </div>
             
             <div className="flex gap-3 justify-end">
@@ -709,7 +744,7 @@ const WarehousePage: React.FC = () => {
                 className="btn-danger"
                 disabled={isClearing}
               >
-                {isClearing ? '清空中...' : '确认清空'}
+                {isClearing ? clearingStatus || '清空中...' : '确认清空'}
               </button>
             </div>
           </div>
