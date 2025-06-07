@@ -13,6 +13,7 @@ const WarehousePage: React.FC = () => {
   const [isBatchMode, setIsBatchMode] = useState(false);
   const [selectedItems, setSelectedItems] = useState<Set<string>>(new Set());
   const [hoveredItem, setHoveredItem] = useState<string | null>(null);
+  const [showBatchConfirm, setShowBatchConfirm] = useState(false);
 
   // Group items by date
   const groupedItems = useMemo(() => {
@@ -48,6 +49,15 @@ const WarehousePage: React.FC = () => {
       totalWeight: acc.totalWeight + item.weight
     }), { totalQuantity: 0, totalVolume: 0, totalWeight: 0 });
   }, [warehouseItems]);
+
+  const selectedStats = useMemo(() => {
+    const selectedCargos = warehouseItems.filter(item => selectedItems.has(item.id));
+    return selectedCargos.reduce((acc, item) => ({
+      totalQuantity: acc.totalQuantity + item.quantity,
+      totalVolume: acc.totalVolume + item.volume,
+      totalWeight: acc.totalWeight + item.weight
+    }), { totalQuantity: 0, totalVolume: 0, totalWeight: 0 });
+  }, [warehouseItems, selectedItems]);
 
   const handleSelectAll = () => {
     if (selectedItems.size === warehouseItems.length) {
@@ -92,9 +102,18 @@ const WarehousePage: React.FC = () => {
   };
 
   const handleBatchLoad = () => {
-    loadToTruck(Array.from(selectedItems));
-    setSelectedItems(new Set());
-    setIsBatchMode(false);
+    setShowBatchConfirm(true);
+  };
+
+  const confirmBatchLoad = async () => {
+    try {
+      await loadToTruck(Array.from(selectedItems));
+      setSelectedItems(new Set());
+      setIsBatchMode(false);
+      setShowBatchConfirm(false);
+    } catch (error) {
+      console.error('批量装车失败:', error);
+    }
   };
 
   const handleExportExcel = () => {
@@ -139,6 +158,31 @@ const WarehousePage: React.FC = () => {
         </div>
       </div>
 
+      {/* 选中货物统计 */}
+      {isBatchMode && selectedItems.size > 0 && (
+        <div className="card bg-green-50 border-green-200 mb-6">
+          <h3 className="text-lg font-semibold text-green-900 mb-3">已选择货物统计</h3>
+          <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
+            <div>
+              <p className="text-sm text-green-700">选中件数</p>
+              <p className="text-xl font-bold text-green-800">{selectedItems.size}</p>
+            </div>
+            <div>
+              <p className="text-sm text-green-700">总件数</p>
+              <p className="text-xl font-bold text-green-800">{selectedStats.totalQuantity}</p>
+            </div>
+            <div>
+              <p className="text-sm text-green-700">总立方 (m³)</p>
+              <p className="text-xl font-bold text-green-800">{selectedStats.totalVolume.toFixed(2)}</p>
+            </div>
+            <div>
+              <p className="text-sm text-green-700">总吨位 (t)</p>
+              <p className="text-xl font-bold text-green-800">{selectedStats.totalWeight.toFixed(2)}</p>
+            </div>
+          </div>
+        </div>
+      )}
+
       <div className="flex justify-between items-center mb-6">
         <div className="flex gap-4 items-center">
           <div className="relative w-64">
@@ -173,9 +217,9 @@ const WarehousePage: React.FC = () => {
               setIsBatchMode(!isBatchMode);
               setSelectedItems(new Set());
             }}
-            className={`btn-secondary ${isBatchMode ? 'bg-blue-100' : ''}`}
+            className={`btn-secondary ${isBatchMode ? 'bg-blue-100 border-blue-300' : ''}`}
           >
-            批量操作
+            {isBatchMode ? '退出批量模式' : '批量操作'}
           </button>
           
           {isBatchMode && (
@@ -183,7 +227,7 @@ const WarehousePage: React.FC = () => {
               onClick={handleSelectAll}
               className="btn-secondary"
             >
-              全选
+              {selectedItems.size === warehouseItems.length ? '取消全选' : '全选'}
             </button>
           )}
         </div>
@@ -198,17 +242,22 @@ const WarehousePage: React.FC = () => {
         <>
           {groupedItems.map(([date, items]) => (
             <div key={date} className="mb-8">
-              <div className="flex items-center mb-4">
+              <div className="flex items-center justify-between mb-4">
                 <h3 className="text-lg font-semibold text-blue-900">
                   {format(new Date(date), 'yyyy年MM月dd日', { locale: zhCN })}
                 </h3>
                 {isBatchMode && (
-                  <button
-                    onClick={() => handleSelectDate(date)}
-                    className="ml-4 text-sm text-blue-600 hover:text-blue-800"
-                  >
-                    {items.every(item => selectedItems.has(item.id)) ? '取消选择' : '选择本日期'}
-                  </button>
+                  <div className="flex items-center gap-4">
+                    <span className="text-sm text-gray-600">
+                      本日期: {items.filter(item => selectedItems.has(item.id)).length} / {items.length} 已选
+                    </span>
+                    <button
+                      onClick={() => handleSelectDate(date)}
+                      className="text-sm text-blue-600 hover:text-blue-800 font-medium"
+                    >
+                      {items.every(item => selectedItems.has(item.id)) ? '取消选择本日期' : '选择本日期'}
+                    </button>
+                  </div>
                 )}
               </div>
               
@@ -216,7 +265,7 @@ const WarehousePage: React.FC = () => {
                 <table className="data-table">
                   <thead>
                     <tr>
-                      {isBatchMode && <th className="w-12"></th>}
+                      {isBatchMode && <th className="w-12">选择</th>}
                       <th>操作</th>
                       <th>姓名</th>
                       <th>厂家</th>
@@ -233,19 +282,24 @@ const WarehousePage: React.FC = () => {
                     {items.map((cargo) => (
                       <tr 
                         key={cargo.id} 
-                        className={confirmShipId === cargo.id || confirmLoadId === cargo.id ? 'bg-red-50' : selectedItems.has(cargo.id) ? 'bg-blue-50' : ''}
+                        className={`
+                          ${confirmShipId === cargo.id || confirmLoadId === cargo.id ? 'bg-red-50' : ''}
+                          ${selectedItems.has(cargo.id) ? 'bg-blue-50 border-blue-200' : ''}
+                          ${isBatchMode ? 'cursor-pointer hover:bg-gray-50' : ''}
+                        `}
+                        onClick={isBatchMode ? () => handleSelectItem(cargo.id) : undefined}
                       >
                         {isBatchMode && (
-                          <td>
+                          <td onClick={(e) => e.stopPropagation()}>
                             <input
                               type="checkbox"
                               checked={selectedItems.has(cargo.id)}
                               onChange={() => handleSelectItem(cargo.id)}
-                              className="w-4 h-4 text-blue-600"
+                              className="w-4 h-4 text-blue-600 rounded focus:ring-blue-500"
                             />
                           </td>
                         )}
-                        <td>
+                        <td onClick={(e) => e.stopPropagation()}>
                           {!isBatchMode && (
                             confirmShipId === cargo.id ? (
                               <div className="confirm-actions">
@@ -305,7 +359,15 @@ const WarehousePage: React.FC = () => {
                         <td>{cargo.manufacturer}</td>
                         <td>{cargo.cargoType}</td>
                         <td>{cargo.category}</td>
-                        <td>{cargo.urgent ? '是' : '否'}</td>
+                        <td>
+                          <span className={`px-2 py-1 rounded-full text-xs font-medium ${
+                            cargo.urgent 
+                              ? 'bg-red-100 text-red-800' 
+                              : 'bg-gray-100 text-gray-800'
+                          }`}>
+                            {cargo.urgent ? '紧急' : '普通'}
+                          </span>
+                        </td>
                         <td>{cargo.quantity}</td>
                         <td 
                           className="relative cursor-help"
@@ -332,26 +394,71 @@ const WarehousePage: React.FC = () => {
             </div>
           ))}
 
+          {/* 批量操作按钮 */}
           {isBatchMode && selectedItems.size > 0 && (
             <div className="batch-actions">
               <button
                 onClick={handleBatchShip}
-                className="bg-red-500 hover:bg-red-600 text-white"
+                className="bg-red-500 hover:bg-red-600 text-white flex items-center gap-2"
               >
+                <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 19l9 2-9-18-9 18 9-2zm0 0v-8" />
+                </svg>
                 批量送出 ({selectedItems.size})
               </button>
               <button
                 onClick={handleBatchLoad}
-                className="bg-green-500 hover:bg-green-600 text-white"
+                className="bg-green-500 hover:bg-green-600 text-white flex items-center gap-2"
               >
-                批量装车 ({selectedItems.size})
+                <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" />
+                </svg>
+                智能装车 ({selectedItems.size})
               </button>
               <button
                 onClick={handleExportExcel}
-                className="bg-blue-500 hover:bg-blue-600 text-white"
+                className="bg-blue-500 hover:bg-blue-600 text-white flex items-center gap-2"
               >
+                <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 10v6m0 0l-3-3m3 3l3-3m2 8H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
+                </svg>
                 导出Excel
               </button>
+            </div>
+          )}
+
+          {/* 批量装车确认对话框 */}
+          {showBatchConfirm && (
+            <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
+              <div className="bg-white rounded-lg p-6 max-w-md w-full mx-4">
+                <h3 className="text-lg font-semibold text-gray-900 mb-4">确认批量装车</h3>
+                <div className="mb-4">
+                  <p className="text-gray-600 mb-2">您即将装车的货物统计：</p>
+                  <div className="bg-gray-50 p-3 rounded">
+                    <p>选中货物：{selectedItems.size} 项</p>
+                    <p>总件数：{selectedStats.totalQuantity} 件</p>
+                    <p>总体积：{selectedStats.totalVolume.toFixed(2)} m³</p>
+                    <p>总重量：{selectedStats.totalWeight.toFixed(2)} t</p>
+                  </div>
+                </div>
+                <p className="text-sm text-gray-500 mb-6">
+                  系统将自动为您分配最优的货车组合，确保装载效率最大化。
+                </p>
+                <div className="flex gap-3 justify-end">
+                  <button
+                    onClick={() => setShowBatchConfirm(false)}
+                    className="btn-secondary"
+                  >
+                    取消
+                  </button>
+                  <button
+                    onClick={confirmBatchLoad}
+                    className="btn-success"
+                  >
+                    确认装车
+                  </button>
+                </div>
+              </div>
             </div>
           )}
         </>
