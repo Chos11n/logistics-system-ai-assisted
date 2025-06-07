@@ -1,14 +1,18 @@
 import React, { createContext, useState, useEffect, useContext, ReactNode } from 'react';
-import { Cargo, TruckCargo, TRUCK_TYPES } from '../types/CargoTypes';
+import { Cargo, TruckCargo } from '../types/CargoTypes';
+import { cargoAPI, truckAPI } from '../services/api';
 
 interface CargoContextType {
   warehouseItems: Cargo[];
   historyItems: Cargo[];
   truckItems: TruckCargo[];
-  addCargo: (cargo: Cargo) => void;
-  shipCargo: (id: string) => void;
-  loadToTruck: (cargoIds: string[]) => void;
-  undoShipment: (id: string) => void;
+  loading: boolean;
+  error: string | null;
+  addCargo: (cargo: Cargo) => Promise<void>;
+  shipCargo: (id: string) => Promise<void>;
+  loadToTruck: (cargoIds: string[]) => Promise<void>;
+  undoShipment: (id: string) => Promise<void>;
+  refreshData: () => Promise<void>;
 }
 
 const CargoContext = createContext<CargoContextType | undefined>(undefined);
@@ -25,227 +29,139 @@ interface CargoProviderProps {
   children: ReactNode;
 }
 
-interface Space {
-  x: number;
-  y: number;
-  z: number;
-  length: number;
-  width: number;
-  height: number;
-}
-
 export const CargoProvider: React.FC<CargoProviderProps> = ({ children }) => {
   const [warehouseItems, setWarehouseItems] = useState<Cargo[]>([]);
   const [historyItems, setHistoryItems] = useState<Cargo[]>([]);
   const [truckItems, setTruckItems] = useState<TruckCargo[]>([]);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
 
+  // Load data from API
+  const refreshData = async () => {
+    setLoading(true);
+    setError(null);
+    
+    try {
+      const [warehouseCargo, shippedCargo, trucks] = await Promise.all([
+        cargoAPI.getAll('warehouse'),
+        cargoAPI.getAll('shipped'),
+        truckAPI.getAll(),
+      ]);
+
+      setWarehouseItems(warehouseCargo);
+      setHistoryItems(shippedCargo);
+      setTruckItems(trucks);
+    } catch (err) {
+      console.error('Error loading data:', err);
+      setError('Failed to load data from server');
+      
+      // Fallback to localStorage if API fails
+      const storedWarehouse = localStorage.getItem('warehouseItems');
+      const storedHistory = localStorage.getItem('historyItems');
+      const storedTrucks = localStorage.getItem('truckItems');
+
+      if (storedWarehouse) setWarehouseItems(JSON.parse(storedWarehouse));
+      if (storedHistory) setHistoryItems(JSON.parse(storedHistory));
+      if (storedTrucks) setTruckItems(JSON.parse(storedTrucks));
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  // Initial data load
   useEffect(() => {
-    const storedWarehouse = localStorage.getItem('warehouseItems');
-    const storedHistory = localStorage.getItem('historyItems');
-    const storedTrucks = localStorage.getItem('truckItems');
-
-    if (storedWarehouse) setWarehouseItems(JSON.parse(storedWarehouse));
-    if (storedHistory) setHistoryItems(JSON.parse(storedHistory));
-    if (storedTrucks) setTruckItems(JSON.parse(storedTrucks));
+    refreshData();
   }, []);
 
+  // Backup to localStorage
   useEffect(() => {
     localStorage.setItem('warehouseItems', JSON.stringify(warehouseItems));
     localStorage.setItem('historyItems', JSON.stringify(historyItems));
     localStorage.setItem('truckItems', JSON.stringify(truckItems));
   }, [warehouseItems, historyItems, truckItems]);
 
-  const addCargo = (cargo: Cargo) => {
-    setWarehouseItems([cargo, ...warehouseItems]);
-  };
-
-  const shipCargo = (id: string) => {
-    const cargoToShip = warehouseItems.find(item => item.id === id);
-    if (cargoToShip) {
-      setWarehouseItems(warehouseItems.filter(item => item.id !== id));
-      setHistoryItems([cargoToShip, ...historyItems]);
-    }
-  };
-
-  const canFitInSpace = (cargo: Cargo, space: Space): boolean => {
-    // 检查六种不同的放置方向
-    const orientations = [
-      [cargo.length, cargo.width, cargo.height],
-      [cargo.length, cargo.height, cargo.width],
-      [cargo.width, cargo.length, cargo.height],
-      [cargo.width, cargo.height, cargo.length],
-      [cargo.height, cargo.length, cargo.width],
-      [cargo.height, cargo.width, cargo.length]
-    ];
-
-    return orientations.some(([l, w, h]) => 
-      l <= space.length && w <= space.width && h <= space.height
-    );
-  };
-
-  const findBestFit = (cargo: Cargo, spaces: Space[]): Space | null => {
-    let bestSpace: Space | null = null;
-    let minWastedSpace = Infinity;
-
-    for (const space of spaces) {
-      if (canFitInSpace(cargo, space)) {
-        const wastedSpace = (space.length * space.width * space.height) - 
-                          (cargo.length * cargo.width * cargo.height);
-        if (wastedSpace < minWastedSpace) {
-          minWastedSpace = wastedSpace;
-          bestSpace = space;
-        }
-      }
-    }
-
-    return bestSpace;
-  };
-
-  const splitSpace = (space: Space, cargo: Cargo): Space[] => {
-    const newSpaces: Space[] = [];
+  const addCargo = async (cargo: Cargo) => {
+    setLoading(true);
+    setError(null);
     
-    // 在剩余空间中创建新的可用空间
-    if (space.length - cargo.length > 0) {
-      newSpaces.push({
-        x: space.x + cargo.length,
-        y: space.y,
-        z: space.z,
-        length: space.length - cargo.length,
-        width: space.width,
-        height: space.height
-      });
+    try {
+      await cargoAPI.create(cargo);
+      await refreshData(); // Refresh to get updated data
+    } catch (err) {
+      console.error('Error adding cargo:', err);
+      setError('Failed to add cargo');
+      
+      // Fallback to local state
+      setWarehouseItems([cargo, ...warehouseItems]);
+    } finally {
+      setLoading(false);
     }
-
-    if (space.width - cargo.width > 0) {
-      newSpaces.push({
-        x: space.x,
-        y: space.y + cargo.width,
-        z: space.z,
-        length: cargo.length,
-        width: space.width - cargo.width,
-        height: space.height
-      });
-    }
-
-    if (space.height - cargo.height > 0) {
-      newSpaces.push({
-        x: space.x,
-        y: space.y,
-        z: space.z + cargo.height,
-        length: cargo.length,
-        width: cargo.width,
-        height: space.height - cargo.height
-      });
-    }
-
-    return newSpaces;
   };
 
-  const tryLoadIntoTruck = (
-    cargos: Cargo[], 
-    truckType: typeof TRUCK_TYPES[number]
-  ): { success: boolean; loadedCargos: Cargo[]; remainingCargos: Cargo[] } => {
-    let availableSpaces: Space[] = [{
-      x: 0,
-      y: 0,
-      z: 0,
-      length: truckType.length,
-      width: truckType.width,
-      height: truckType.height
-    }];
-
-    const loadedCargos: Cargo[] = [];
-    const remainingCargos: Cargo[] = [];
-    let currentWeight = 0;
-
-    for (const cargo of cargos) {
-      if (currentWeight + cargo.weight > truckType.maxWeight) {
-        remainingCargos.push(cargo);
-        continue;
+  const shipCargo = async (id: string) => {
+    setLoading(true);
+    setError(null);
+    
+    try {
+      await cargoAPI.updateStatus(id, 'shipped');
+      await refreshData(); // Refresh to get updated data
+    } catch (err) {
+      console.error('Error shipping cargo:', err);
+      setError('Failed to ship cargo');
+      
+      // Fallback to local state
+      const cargoToShip = warehouseItems.find(item => item.id === id);
+      if (cargoToShip) {
+        setWarehouseItems(warehouseItems.filter(item => item.id !== id));
+        setHistoryItems([cargoToShip, ...historyItems]);
       }
-
-      const bestSpace = findBestFit(cargo, availableSpaces);
-      if (bestSpace) {
-        availableSpaces = availableSpaces.filter(space => space !== bestSpace);
-        availableSpaces.push(...splitSpace(bestSpace, cargo));
-        loadedCargos.push(cargo);
-        currentWeight += cargo.weight;
-      } else {
-        remainingCargos.push(cargo);
-      }
+    } finally {
+      setLoading(false);
     }
-
-    return {
-      success: loadedCargos.length > 0,
-      loadedCargos,
-      remainingCargos
-    };
   };
 
-  const loadToTruck = (cargoIds: string[]) => {
-    const cargosToLoad = warehouseItems.filter(item => cargoIds.includes(item.id));
-    const loadingDate = new Date().toISOString().split('T')[0];
-    const newTruckCargos: TruckCargo[] = [];
+  const loadToTruck = async (cargoIds: string[]) => {
+    setLoading(true);
+    setError(null);
+    
+    try {
+      await truckAPI.loadCargo(cargoIds);
+      await refreshData(); // Refresh to get updated data
+    } catch (err) {
+      console.error('Error loading cargo to truck:', err);
+      setError('Failed to load cargo to truck');
+    } finally {
+      setLoading(false);
+    }
+  };
 
-    // 按体积从大到小排序货物
-    let remainingCargos = [...cargosToLoad].sort((a, b) => b.volume - a.volume);
-
-    while (remainingCargos.length > 0) {
-      let bestTruckType = null;
-      let bestLoadResult = null;
-
-      // 尝试每种类型的货车
-      for (const truckType of TRUCK_TYPES) {
-        const loadResult = tryLoadIntoTruck(remainingCargos, truckType);
+  const undoShipment = async (id: string) => {
+    setLoading(true);
+    setError(null);
+    
+    try {
+      await cargoAPI.updateStatus(id, 'warehouse');
+      await refreshData(); // Refresh to get updated data
+    } catch (err) {
+      console.error('Error undoing shipment:', err);
+      setError('Failed to undo shipment');
+      
+      // Fallback to local state
+      const cargoToRestore = historyItems.find(item => item.id === id);
+      if (cargoToRestore) {
+        setHistoryItems(historyItems.filter(item => item.id !== id));
         
-        if (loadResult.success && (!bestLoadResult || loadResult.loadedCargos.length > bestLoadResult.loadedCargos.length)) {
-          bestTruckType = truckType;
-          bestLoadResult = loadResult;
-        }
+        // Remove from trucks
+        const updatedTruckItems = truckItems.map(truck => ({
+          ...truck,
+          cargos: truck.cargos.filter(cargo => cargo.id !== id)
+        })).filter(truck => truck.cargos.length > 0);
+        
+        setTruckItems(updatedTruckItems);
+        setWarehouseItems([cargoToRestore, ...warehouseItems]);
       }
-
-      if (bestTruckType && bestLoadResult) {
-        newTruckCargos.push({
-          truckId: `truck-${truckItems.length + newTruckCargos.length + 1}`,
-          truckType: bestTruckType,
-          cargos: bestLoadResult.loadedCargos,
-          loadingDate
-        });
-        remainingCargos = bestLoadResult.remainingCargos;
-      } else {
-        // 如果没有找到合适的货车，使用最大的货车装载第一个货物
-        const largestTruck = TRUCK_TYPES[TRUCK_TYPES.length - 1];
-        newTruckCargos.push({
-          truckId: `truck-${truckItems.length + newTruckCargos.length + 1}`,
-          truckType: largestTruck,
-          cargos: [remainingCargos[0]],
-          loadingDate
-        });
-        remainingCargos = remainingCargos.slice(1);
-      }
-    }
-
-    setTruckItems([...newTruckCargos, ...truckItems]);
-    setWarehouseItems(warehouseItems.filter(item => !cargoIds.includes(item.id)));
-    setHistoryItems([...cargosToLoad, ...historyItems]);
-  };
-
-  const undoShipment = (id: string) => {
-    const cargoToRestore = historyItems.find(item => item.id === id);
-    if (cargoToRestore) {
-      // 从历史记录中移除
-      setHistoryItems(historyItems.filter(item => item.id !== id));
-      
-      // 从所有货车中移除该货物
-      const updatedTruckItems = truckItems.map(truck => ({
-        ...truck,
-        cargos: truck.cargos.filter(cargo => cargo.id !== id)
-      })).filter(truck => truck.cargos.length > 0); // 移除空货车
-      
-      setTruckItems(updatedTruckItems);
-      
-      // 恢复到仓库
-      setWarehouseItems([cargoToRestore, ...warehouseItems]);
+    } finally {
+      setLoading(false);
     }
   };
 
@@ -254,10 +170,13 @@ export const CargoProvider: React.FC<CargoProviderProps> = ({ children }) => {
       warehouseItems, 
       historyItems, 
       truckItems,
+      loading,
+      error,
       addCargo, 
       shipCargo,
       loadToTruck,
-      undoShipment 
+      undoShipment,
+      refreshData
     }}>
       {children}
     </CargoContext.Provider>
