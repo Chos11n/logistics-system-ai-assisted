@@ -17,7 +17,7 @@ export interface Cargo {
   truckId?: string;
 }
 
-export type CargoType = '轻货' | '重货' | '轻泡货' | '重泡货' | '其它';
+export type CargoType = '特轻货' | '轻货' | '重泡货' | '重货' | '特重货';
 
 export interface TruckCargo {
   truckId: string;
@@ -61,3 +61,22 @@ export const TRUCK_TYPES: TruckType[] = [
     maxWeight: 15
   }
 ];
+
+// 货型计算函数
+export const calculateCargoType = (weight: number, volume: number): CargoType => {
+  if (volume === 0) return '轻货';
+  
+  const density = (weight * 1000) / volume; // Convert tons to kg, then kg/m³
+  
+  if (density <= 100) {
+    return '特轻货';
+  } else if (density <= 200) {
+    return '轻货';
+  } else if (density <= 250) {
+    return '重泡货';
+  } else if (density <= 350) {
+    return '重货';
+  } else {
+    return '特重货';
+  }
+};
