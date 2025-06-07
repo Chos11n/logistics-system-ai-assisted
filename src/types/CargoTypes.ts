@@ -15,6 +15,7 @@ export interface Cargo {
   urgent: boolean;
   selected?: boolean;
   truckId?: string;
+  customerId?: string;
 }
 
 export type CargoType = '特轻货' | '轻货' | '重泡货' | '重货' | '特重货';
@@ -33,6 +34,28 @@ export interface TruckType {
   height: number;
   maxVolume: number;
   maxWeight: number;
+}
+
+export interface Truck {
+  id: string;
+  name: string;
+  maxWeight: number; // 最大载重 (t)
+  maxVolume: number; // 最大容积 (m³)
+  selfWeight: number; // 车辆自重 (t)
+  availableWeight: number; // 可用载重 (t)
+  status: 'available' | 'loading' | 'dispatched' | 'maintenance';
+  notes?: string;
+  createdAt: string;
+}
+
+export interface Customer {
+  id: string;
+  name: string;
+  type: 'large' | 'medium' | 'small'; // 大客户、中客户、小客户
+  contactInfo?: string;
+  address?: string;
+  notes?: string;
+  createdAt: string;
 }
 
 export const TRUCK_TYPES: TruckType[] = [
@@ -78,5 +101,15 @@ export const calculateCargoType = (weight: number, volume: number): CargoType =>
     return '重货';
   } else {
     return '特重货';
+  }
+};
+
+// 客户优先级权重
+export const getCustomerPriority = (customerType: Customer['type']): number => {
+  switch (customerType) {
+    case 'large': return 3;
+    case 'medium': return 2;
+    case 'small': return 1;
+    default: return 0;
   }
 };

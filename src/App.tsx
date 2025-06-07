@@ -6,6 +6,8 @@ import InputCargoPage from './pages/InputCargoPage';
 import WarehousePage from './pages/WarehousePage';
 import HistoryPage from './pages/HistoryPage';
 import TrucksPage from './pages/TrucksPage';
+import TruckManagementPage from './pages/TruckManagementPage';
+import CustomerManagementPage from './pages/CustomerManagementPage';
 import LoadingSpinner from './components/LoadingSpinner';
 import ErrorMessage from './components/ErrorMessage';
 import { CargoProvider, useCargo } from './context/CargoContext';
@@ -48,6 +50,10 @@ function AppContent() {
         return <WarehousePage />;
       case 'trucks':
         return <TrucksPage />;
+      case 'truck-management':
+        return <TruckManagementPage />;
+      case 'customer-management':
+        return <CustomerManagementPage />;
       case 'history':
         return <HistoryPage />;
       default:

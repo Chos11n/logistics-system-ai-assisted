@@ -1,13 +1,16 @@
 import React, { useState, useEffect } from 'react';
 import { useCargo } from '../context/CargoContext';
-import { Cargo } from '../types/CargoTypes';
+import { Cargo, Customer } from '../types/CargoTypes';
 
 const InputCargoPage: React.FC = () => {
   const { addCargo } = useCargo();
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [submitSuccess, setSubmitSuccess] = useState(false);
   const [showConfirmDialog, setShowConfirmDialog] = useState(false);
+  const [showAddCustomerDialog, setShowAddCustomerDialog] = useState(false);
   const [calculatedCargoType, setCalculatedCargoType] = useState('');
+  const [customers, setCustomers] = useState<Customer[]>([]);
+  const [selectedCustomer, setSelectedCustomer] = useState<string>('');
   
   const [cargoData, setCargoData] = useState<Omit<Cargo, 'id' | 'volume' | 'cargoType'>>({
     name: '',
@@ -22,6 +25,22 @@ const InputCargoPage: React.FC = () => {
     category: '',
     urgent: false
   });
+
+  const [newCustomerData, setNewCustomerData] = useState({
+    name: '',
+    type: 'medium' as Customer['type'],
+    contactInfo: '',
+    address: '',
+    notes: ''
+  });
+
+  // 加载客户数据
+  useEffect(() => {
+    const storedCustomers = localStorage.getItem('customers');
+    if (storedCustomers) {
+      setCustomers(JSON.parse(storedCustomers));
+    }
+  }, []);
 
   const calculateVolume = (length: number, width: number, height: number): number => {
     return length * width * height; // Already in cubic meters since input is in meters
@@ -75,6 +94,51 @@ const InputCargoPage: React.FC = () => {
     }
   };
 
+  const handleCustomerSelect = (customerId: string) => {
+    setSelectedCustomer(customerId);
+    const customer = customers.find(c => c.id === customerId);
+    if (customer) {
+      setCargoData({
+        ...cargoData,
+        manufacturer: customer.name
+      });
+    }
+  };
+
+  const handleAddCustomer = () => {
+    if (!newCustomerData.name.trim()) {
+      alert('请输入客户名称');
+      return;
+    }
+
+    const newCustomer: Customer = {
+      id: `customer-${Date.now()}`,
+      ...newCustomerData,
+      createdAt: new Date().toISOString()
+    };
+
+    const updatedCustomers = [newCustomer, ...customers];
+    setCustomers(updatedCustomers);
+    localStorage.setItem('customers', JSON.stringify(updatedCustomers));
+
+    // 自动选择新添加的客户
+    setSelectedCustomer(newCustomer.id);
+    setCargoData({
+      ...cargoData,
+      manufacturer: newCustomer.name
+    });
+
+    // 重置表单
+    setNewCustomerData({
+      name: '',
+      type: 'medium',
+      contactInfo: '',
+      address: '',
+      notes: ''
+    });
+    setShowAddCustomerDialog(false);
+  };
+
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
     
@@ -103,7 +167,8 @@ const InputCargoPage: React.FC = () => {
       ...cargoData,
       id: `cargo-${Date.now()}`,
       volume,
-      cargoType
+      cargoType,
+      customerId: selectedCustomer || undefined
     };
     
     try {
@@ -124,6 +189,7 @@ const InputCargoPage: React.FC = () => {
         urgent: false
       });
       setCalculatedCargoType('');
+      setSelectedCustomer('');
       setShowConfirmDialog(false);
       
       setTimeout(() => {
@@ -149,6 +215,7 @@ const InputCargoPage: React.FC = () => {
   };
 
   const densityInfo = getDensityInfo();
+  const selectedCustomerInfo = customers.find(c => c.id === selectedCustomer);
 
   return (
     <div className="p-6 max-w-3xl mx-auto slide-in">
@@ -180,16 +247,42 @@ const InputCargoPage: React.FC = () => {
             </div>
             
             <div>
-              <label htmlFor="manufacturer" className="form-label">厂家</label>
+              <label htmlFor="manufacturer" className="form-label">厂家/客户</label>
+              <div className="flex gap-2">
+                <select
+                  value={selectedCustomer}
+                  onChange={(e) => handleCustomerSelect(e.target.value)}
+                  className="form-input flex-1"
+                >
+                  <option value="">选择客户或手动输入</option>
+                  {customers.map(customer => (
+                    <option key={customer.id} value={customer.id}>
+                      {customer.name} ({customer.type === 'large' ? '大客户' : customer.type === 'medium' ? '中客户' : '小客户'})
+                    </option>
+                  ))}
+                </select>
+                <button
+                  type="button"
+                  onClick={() => setShowAddCustomerDialog(true)}
+                  className="btn-secondary whitespace-nowrap"
+                >
+                  新增客户
+                </button>
+              </div>
               <input
                 type="text"
-                id="manufacturer"
                 name="manufacturer"
                 value={cargoData.manufacturer}
                 onChange={handleChange}
-                className="form-input"
+                className="form-input mt-2"
+                placeholder="或手动输入厂家名称"
                 required
               />
+              {selectedCustomerInfo && (
+                <p className="text-xs text-blue-600 mt-1">
+                  已选择：{selectedCustomerInfo.name} ({selectedCustomerInfo.type === 'large' ? '大客户' : selectedCustomerInfo.type === 'medium' ? '中客户' : '小客户'})
+                </p>
+              )}
             </div>
 
             <div>
@@ -352,6 +445,68 @@ const InputCargoPage: React.FC = () => {
         </form>
       </div>
 
+      {/* 新增客户对话框 */}
+      {showAddCustomerDialog && (
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
+          <div className="bg-white rounded-lg p-6 max-w-md w-full mx-4">
+            <h3 className="text-lg font-semibold text-gray-900 mb-4">新增客户</h3>
+            
+            <div className="space-y-4">
+              <div>
+                <label className="form-label">客户名称</label>
+                <input
+                  type="text"
+                  value={newCustomerData.name}
+                  onChange={(e) => setNewCustomerData({...newCustomerData, name: e.target.value})}
+                  className="form-input"
+                  required
+                  placeholder="输入客户名称"
+                />
+              </div>
+              
+              <div>
+                <label className="form-label">客户类型</label>
+                <select
+                  value={newCustomerData.type}
+                  onChange={(e) => setNewCustomerData({...newCustomerData, type: e.target.value as Customer['type']})}
+                  className="form-input"
+                >
+                  <option value="large">大客户</option>
+                  <option value="medium">中客户</option>
+                  <option value="small">小客户</option>
+                </select>
+              </div>
+              
+              <div>
+                <label className="form-label">联系方式</label>
+                <input
+                  type="text"
+                  value={newCustomerData.contactInfo}
+                  onChange={(e) => setNewCustomerData({...newCustomerData, contactInfo: e.target.value})}
+                  className="form-input"
+                  placeholder="电话、邮箱等"
+                />
+              </div>
+            </div>
+            
+            <div className="flex gap-3 justify-end mt-6">
+              <button
+                onClick={() => setShowAddCustomerDialog(false)}
+                className="btn-secondary"
+              >
+                取消
+              </button>
+              <button
+                onClick={handleAddCustomer}
+                className="btn-primary"
+              >
+                添加客户
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* 确认提交对话框 */}
       {showConfirmDialog && (
         <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
@@ -367,6 +522,11 @@ const InputCargoPage: React.FC = () => {
                 <div>
                   <span className="text-gray-600">厂家：</span>
                   <span className="font-medium">{cargoData.manufacturer}</span>
+                  {selectedCustomerInfo && (
+                    <span className="text-xs text-blue-600 block">
+                      ({selectedCustomerInfo.type === 'large' ? '大客户' : selectedCustomerInfo.type === 'medium' ? '中客户' : '小客户'})
+                    </span>
+                  )}
                 </div>
                 <div>
                   <span className="text-gray-600">种类：</span>
