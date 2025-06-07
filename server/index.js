@@ -257,20 +257,6 @@ app.get('/api/cargo', async (req, res) => {
   }
 });
 
-// Get cargo by ID
-app.get('/api/cargo/:id', async (req, res) => {
-  try {
-    const cargo = await dbGet('SELECT * FROM cargo WHERE id = ?', [req.params.id]);
-    if (!cargo) {
-      return res.status(404).json({ error: 'Cargo not found' });
-    }
-    res.json(cargo);
-  } catch (error) {
-    console.error('Error fetching cargo:', error);
-    res.status(500).json({ error: 'Failed to fetch cargo' });
-  }
-});
-
 // Create new cargo
 app.post('/api/cargo', async (req, res) => {
   try {
@@ -309,40 +295,7 @@ app.post('/api/cargo', async (req, res) => {
   }
 });
 
-// Update cargo status (ship cargo)
-app.patch('/api/cargo/:id/status', async (req, res) => {
-  try {
-    const { status } = req.body;
-    const { id } = req.params;
-
-    await dbRun(
-      'UPDATE cargo SET status = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?',
-      [status, id]
-    );
-
-    const updatedCargo = await dbGet('SELECT * FROM cargo WHERE id = ?', [id]);
-    res.json(updatedCargo);
-  } catch (error) {
-    console.error('Error updating cargo status:', error);
-    res.status(500).json({ error: 'Failed to update cargo status' });
-  }
-});
-
-// Delete cargo
-app.delete('/api/cargo/:id', async (req, res) => {
-  try {
-    const result = await dbRun('DELETE FROM cargo WHERE id = ?', [req.params.id]);
-    if (result.changes === 0) {
-      return res.status(404).json({ error: 'Cargo not found' });
-    }
-    res.json({ message: 'Cargo deleted successfully' });
-  } catch (error) {
-    console.error('Error deleting cargo:', error);
-    res.status(500).json({ error: 'Failed to delete cargo' });
-  }
-});
-
-// Enhanced clear warehouse endpoint with detailed logging
+// Enhanced clear warehouse endpoint with detailed logging - MOVED BEFORE :id route
 app.delete('/api/cargo/clear-warehouse', async (req, res) => {
   console.log('🗑️ === WAREHOUSE CLEAR OPERATION STARTED ===');
   
@@ -436,7 +389,7 @@ app.delete('/api/cargo/clear-warehouse', async (req, res) => {
   }
 });
 
-// Clear all shipped cargo
+// Clear all shipped cargo - MOVED BEFORE :id route
 app.delete('/api/cargo/clear-shipped', async (req, res) => {
   try {
     console.log('🗑️ Starting shipped cargo clear operation...');
@@ -492,6 +445,53 @@ app.delete('/api/cargo/clear-shipped', async (req, res) => {
       code: error.code || 'UNKNOWN_ERROR',
       timestamp: new Date().toISOString()
     });
+  }
+});
+
+// Get cargo by ID - MOVED AFTER specific routes
+app.get('/api/cargo/:id', async (req, res) => {
+  try {
+    const cargo = await dbGet('SELECT * FROM cargo WHERE id = ?', [req.params.id]);
+    if (!cargo) {
+      return res.status(404).json({ error: 'Cargo not found' });
+    }
+    res.json(cargo);
+  } catch (error) {
+    console.error('Error fetching cargo:', error);
+    res.status(500).json({ error: 'Failed to fetch cargo' });
+  }
+});
+
+// Update cargo status (ship cargo)
+app.patch('/api/cargo/:id/status', async (req, res) => {
+  try {
+    const { status } = req.body;
+    const { id } = req.params;
+
+    await dbRun(
+      'UPDATE cargo SET status = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?',
+      [status, id]
+    );
+
+    const updatedCargo = await dbGet('SELECT * FROM cargo WHERE id = ?', [id]);
+    res.json(updatedCargo);
+  } catch (error) {
+    console.error('Error updating cargo status:', error);
+    res.status(500).json({ error: 'Failed to update cargo status' });
+  }
+});
+
+// Delete cargo - MOVED AFTER specific routes
+app.delete('/api/cargo/:id', async (req, res) => {
+  try {
+    const result = await dbRun('DELETE FROM cargo WHERE id = ?', [req.params.id]);
+    if (result.changes === 0) {
+      return res.status(404).json({ error: 'Cargo not found' });
+    }
+    res.json({ message: 'Cargo deleted successfully' });
+  } catch (error) {
+    console.error('Error deleting cargo:', error);
+    res.status(500).json({ error: 'Failed to delete cargo' });
   }
 });
 
