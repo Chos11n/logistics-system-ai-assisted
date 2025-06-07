@@ -11,12 +11,24 @@ const __dirname = dirname(__filename);
 const app = express();
 const PORT = process.env.PORT || 3001;
 
-// Middleware
+// Enhanced CORS configuration for WebContainer
 app.use(cors({
-  origin: ['http://localhost:5173', 'http://127.0.0.1:5173'],
-  credentials: true
+  origin: ['http://localhost:5173', 'http://127.0.0.1:5173', 'https://localhost:5173'],
+  credentials: true,
+  methods: ['GET', 'POST', 'PUT', 'DELETE', 'PATCH', 'OPTIONS'],
+  allowedHeaders: ['Content-Type', 'Authorization', 'X-Requested-With']
 }));
-app.use(express.json());
+
+// Remove CSP headers that might interfere
+app.use((req, res, next) => {
+  res.removeHeader('Content-Security-Policy');
+  res.removeHeader('X-Content-Security-Policy');
+  res.removeHeader('X-WebKit-CSP');
+  next();
+});
+
+app.use(express.json({ limit: '10mb' }));
+app.use(express.urlencoded({ extended: true, limit: '10mb' }));
 
 // Ensure server directory exists
 if (!fs.existsSync(__dirname)) {
@@ -147,7 +159,7 @@ const dbRun = (sql, params = []) => {
   });
 };
 
-// Helper function for database transactions
+// Enhanced database transaction with better error handling
 const dbTransaction = (operations) => {
   return new Promise((resolve, reject) => {
     if (!db) {
@@ -155,33 +167,54 @@ const dbTransaction = (operations) => {
       return;
     }
 
+    console.log('🔄 Starting database transaction with', operations.length, 'operations');
+
     db.serialize(() => {
       db.run('BEGIN TRANSACTION', (err) => {
         if (err) {
-          console.error('Failed to begin transaction:', err);
+          console.error('❌ Failed to begin transaction:', err);
           reject(err);
           return;
         }
 
-        Promise.all(operations.map(op => dbRun(op.sql, op.params)))
+        console.log('✅ Transaction started');
+
+        const executeOperations = async () => {
+          try {
+            const results = [];
+            for (let i = 0; i < operations.length; i++) {
+              const op = operations[i];
+              console.log(`🔄 Executing operation ${i + 1}/${operations.length}: ${op.sql.substring(0, 50)}...`);
+              const result = await dbRun(op.sql, op.params);
+              results.push(result);
+              console.log(`✅ Operation ${i + 1} completed, changes: ${result.changes}`);
+            }
+            return results;
+          } catch (error) {
+            console.error('❌ Operation failed:', error);
+            throw error;
+          }
+        };
+
+        executeOperations()
           .then((results) => {
             db.run('COMMIT', (commitErr) => {
               if (commitErr) {
-                console.error('Failed to commit transaction:', commitErr);
+                console.error('❌ Failed to commit transaction:', commitErr);
                 reject(commitErr);
               } else {
-                console.log('Transaction committed successfully');
+                console.log('✅ Transaction committed successfully');
                 resolve(results);
               }
             });
           })
           .catch((error) => {
-            console.error('Transaction operation failed:', error);
+            console.error('❌ Transaction operation failed:', error);
             db.run('ROLLBACK', (rollbackErr) => {
               if (rollbackErr) {
-                console.error('Failed to rollback transaction:', rollbackErr);
+                console.error('❌ Failed to rollback transaction:', rollbackErr);
               } else {
-                console.log('Transaction rolled back');
+                console.log('🔄 Transaction rolled back');
               }
               reject(error);
             });
@@ -193,7 +226,7 @@ const dbTransaction = (operations) => {
 
 // API Routes
 
-// Health check endpoint (moved to top for quick testing)
+// Health check endpoint
 app.get('/api/health', (req, res) => {
   res.json({ 
     status: 'OK', 
@@ -309,12 +342,12 @@ app.delete('/api/cargo/:id', async (req, res) => {
   }
 });
 
-// Clear all warehouse cargo - IMPROVED WITH BETTER ERROR HANDLING
+// Enhanced clear warehouse endpoint with detailed logging
 app.delete('/api/cargo/clear-warehouse', async (req, res) => {
+  console.log('🗑️ === WAREHOUSE CLEAR OPERATION STARTED ===');
+  
   try {
-    console.log('🗑️ Starting warehouse clear operation...');
-    
-    // First, check if database is available
+    // Check if database is available
     if (!db) {
       console.error('❌ Database not available');
       return res.status(500).json({ 
@@ -324,6 +357,7 @@ app.delete('/api/cargo/clear-warehouse', async (req, res) => {
     }
 
     // Check current warehouse items count
+    console.log('📊 Checking current warehouse items...');
     const warehouseCount = await dbGet('SELECT COUNT(*) as count FROM cargo WHERE status = ?', ['warehouse']);
     console.log(`📦 Found ${warehouseCount.count} warehouse items to clear`);
 
@@ -335,6 +369,10 @@ app.delete('/api/cargo/clear-warehouse', async (req, res) => {
         itemsCleared: 0
       });
     }
+
+    // Get list of items to be cleared for logging
+    const itemsToDelete = await dbAll('SELECT id, name, manufacturer FROM cargo WHERE status = ?', ['warehouse']);
+    console.log('📋 Items to be cleared:', itemsToDelete.map(item => `${item.id}: ${item.name} - ${item.manufacturer}`));
 
     // Use transaction to ensure data consistency
     const operations = [
@@ -349,20 +387,30 @@ app.delete('/api/cargo/clear-warehouse', async (req, res) => {
     ];
 
     console.log('🔄 Executing database transaction...');
-    await dbTransaction(operations);
+    const results = await dbTransaction(operations);
+    
+    console.log('📊 Transaction results:', results);
     
     // Verify the operation
     const remainingCount = await dbGet('SELECT COUNT(*) as count FROM cargo WHERE status = ?', ['warehouse']);
     console.log(`✅ Warehouse cleared successfully. Remaining items: ${remainingCount.count}`);
     
-    res.json({ 
+    const response = { 
       message: 'Warehouse cleared successfully', 
       timestamp: new Date().toISOString(),
       itemsCleared: warehouseCount.count,
-      remainingItems: remainingCount.count
-    });
+      remainingItems: remainingCount.count,
+      operationResults: results
+    };
+    
+    console.log('📤 Sending response:', response);
+    console.log('🗑️ === WAREHOUSE CLEAR OPERATION COMPLETED ===');
+    
+    res.json(response);
   } catch (error) {
-    console.error('❌ Error clearing warehouse:', error);
+    console.error('❌ === WAREHOUSE CLEAR OPERATION FAILED ===');
+    console.error('❌ Error details:', error);
+    console.error('❌ Error stack:', error.stack);
     
     // Provide detailed error information
     let errorMessage = 'Failed to clear warehouse';
@@ -376,16 +424,19 @@ app.delete('/api/cargo/clear-warehouse', async (req, res) => {
       errorDetails = 'Database is locked by another process';
     }
     
-    res.status(500).json({ 
+    const errorResponse = { 
       error: errorMessage,
       details: errorDetails,
       code: error.code || 'UNKNOWN_ERROR',
       timestamp: new Date().toISOString()
-    });
+    };
+    
+    console.log('📤 Sending error response:', errorResponse);
+    res.status(500).json(errorResponse);
   }
 });
 
-// Clear all shipped cargo - IMPROVED WITH BETTER ERROR HANDLING
+// Clear all shipped cargo
 app.delete('/api/cargo/clear-shipped', async (req, res) => {
   try {
     console.log('🗑️ Starting shipped cargo clear operation...');
@@ -466,7 +517,7 @@ app.get('/api/trucks', async (req, res) => {
   }
 });
 
-// Clear all truck records - IMPROVED WITH BETTER ERROR HANDLING
+// Clear all truck records
 app.delete('/api/trucks/clear-all', async (req, res) => {
   try {
     console.log('🗑️ Starting truck records clear operation...');
