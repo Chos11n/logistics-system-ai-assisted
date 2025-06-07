@@ -131,7 +131,7 @@ const AccountManagementPage: React.FC = () => {
 
   const getRoleIcon = (role: User['role']) => {
     switch (role) {
-      case 'admin': return <ShieldCheck className="text-red-600" size={16} />;
+      case 'admin': return <ShieldCheck className="text-red-600\" size={16} />;
       case 'manager': return <Shield className="text-blue-600" size={16} />;
       case 'operator': return <Shield className="text-green-600" size={16} />;
       case 'customer': return <ShieldX className="text-gray-600" size={16} />;
