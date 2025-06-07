@@ -95,8 +95,8 @@ db.serialize(() => {
       truck_id TEXT,
       cargo_id TEXT,
       PRIMARY KEY (truck_id, cargo_id),
-      FOREIGN KEY (truck_id) REFERENCES trucks(id),
-      FOREIGN KEY (cargo_id) REFERENCES cargo(id)
+      FOREIGN KEY (truck_id) REFERENCES trucks(id) ON DELETE CASCADE,
+      FOREIGN KEY (cargo_id) REFERENCES cargo(id) ON DELETE CASCADE
     )
   `, (err) => {
     if (err) {
@@ -143,6 +143,50 @@ const dbRun = (sql, params = []) => {
     db.run(sql, params, function(err) {
       if (err) reject(err);
       else resolve({ id: this.lastID, changes: this.changes });
+    });
+  });
+};
+
+// Helper function for database transactions
+const dbTransaction = (operations) => {
+  return new Promise((resolve, reject) => {
+    if (!db) {
+      reject(new Error('Database not initialized'));
+      return;
+    }
+
+    db.serialize(() => {
+      db.run('BEGIN TRANSACTION', (err) => {
+        if (err) {
+          console.error('Failed to begin transaction:', err);
+          reject(err);
+          return;
+        }
+
+        Promise.all(operations.map(op => dbRun(op.sql, op.params)))
+          .then((results) => {
+            db.run('COMMIT', (commitErr) => {
+              if (commitErr) {
+                console.error('Failed to commit transaction:', commitErr);
+                reject(commitErr);
+              } else {
+                console.log('Transaction committed successfully');
+                resolve(results);
+              }
+            });
+          })
+          .catch((error) => {
+            console.error('Transaction operation failed:', error);
+            db.run('ROLLBACK', (rollbackErr) => {
+              if (rollbackErr) {
+                console.error('Failed to rollback transaction:', rollbackErr);
+              } else {
+                console.log('Transaction rolled back');
+              }
+              reject(error);
+            });
+          });
+      });
     });
   });
 };
@@ -265,31 +309,57 @@ app.delete('/api/cargo/:id', async (req, res) => {
   }
 });
 
-// Clear all warehouse cargo
+// Clear all warehouse cargo - IMPROVED WITH TRANSACTION
 app.delete('/api/cargo/clear-warehouse', async (req, res) => {
   try {
-    const result = await dbRun('DELETE FROM cargo WHERE status = ?', ['warehouse']);
+    console.log('Starting warehouse clear operation...');
+    
+    // Use transaction to ensure data consistency
+    const operations = [
+      { sql: 'DELETE FROM truck_cargo WHERE cargo_id IN (SELECT id FROM cargo WHERE status = ?)', params: ['warehouse'] },
+      { sql: 'DELETE FROM cargo WHERE status = ?', params: ['warehouse'] }
+    ];
+
+    await dbTransaction(operations);
+    
+    console.log('Warehouse cleared successfully');
     res.json({ 
       message: 'Warehouse cleared successfully', 
-      deletedCount: result.changes 
+      timestamp: new Date().toISOString()
     });
   } catch (error) {
     console.error('Error clearing warehouse:', error);
-    res.status(500).json({ error: 'Failed to clear warehouse' });
+    res.status(500).json({ 
+      error: 'Failed to clear warehouse',
+      details: error.message 
+    });
   }
 });
 
-// Clear all shipped cargo
+// Clear all shipped cargo - IMPROVED WITH TRANSACTION
 app.delete('/api/cargo/clear-shipped', async (req, res) => {
   try {
-    const result = await dbRun('DELETE FROM cargo WHERE status = ?', ['shipped']);
+    console.log('Starting shipped cargo clear operation...');
+    
+    // Use transaction to ensure data consistency
+    const operations = [
+      { sql: 'DELETE FROM truck_cargo WHERE cargo_id IN (SELECT id FROM cargo WHERE status = ?)', params: ['shipped'] },
+      { sql: 'DELETE FROM cargo WHERE status = ?', params: ['shipped'] }
+    ];
+
+    await dbTransaction(operations);
+    
+    console.log('Shipped cargo cleared successfully');
     res.json({ 
       message: 'Shipped cargo cleared successfully', 
-      deletedCount: result.changes 
+      timestamp: new Date().toISOString()
     });
   } catch (error) {
     console.error('Error clearing shipped cargo:', error);
-    res.status(500).json({ error: 'Failed to clear shipped cargo' });
+    res.status(500).json({ 
+      error: 'Failed to clear shipped cargo',
+      details: error.message 
+    });
   }
 });
 
@@ -315,22 +385,31 @@ app.get('/api/trucks', async (req, res) => {
   }
 });
 
-// Clear all truck records
+// Clear all truck records - IMPROVED WITH TRANSACTION
 app.delete('/api/trucks/clear-all', async (req, res) => {
   try {
-    // Delete truck-cargo relationships first
-    await dbRun('DELETE FROM truck_cargo');
+    console.log('Starting truck records clear operation...');
     
-    // Delete trucks
-    const result = await dbRun('DELETE FROM trucks');
+    // Use transaction to ensure data consistency
+    const operations = [
+      { sql: 'DELETE FROM truck_cargo', params: [] },
+      { sql: 'DELETE FROM trucks', params: [] },
+      { sql: 'UPDATE cargo SET status = ? WHERE status = ?', params: ['warehouse', 'shipped'] }
+    ];
+
+    await dbTransaction(operations);
     
+    console.log('All truck records cleared successfully');
     res.json({ 
       message: 'All truck records cleared successfully', 
-      deletedCount: result.changes 
+      timestamp: new Date().toISOString()
     });
   } catch (error) {
     console.error('Error clearing truck records:', error);
-    res.status(500).json({ error: 'Failed to clear truck records' });
+    res.status(500).json({ 
+      error: 'Failed to clear truck records',
+      details: error.message 
+    });
   }
 });
 
@@ -434,30 +513,31 @@ app.post('/api/trucks/load', async (req, res) => {
     const loadingDate = new Date().toISOString().split('T')[0];
     const createdTrucks = [];
 
-    // Create trucks and load cargo
+    // Create trucks and load cargo using transaction
     for (let i = 0; i < optimizedTrucks.length; i++) {
       const truckData = optimizedTrucks[i];
       const truckId = `truck-${Date.now()}-${i}`;
 
-      // Create truck
-      await dbRun(`
-        INSERT INTO trucks (id, truck_type, loading_date)
-        VALUES (?, ?, ?)
-      `, [truckId, JSON.stringify(truckData.truckType), loadingDate]);
+      const operations = [
+        // Create truck
+        { 
+          sql: 'INSERT INTO trucks (id, truck_type, loading_date) VALUES (?, ?, ?)', 
+          params: [truckId, JSON.stringify(truckData.truckType), loadingDate] 
+        },
+        // Link cargo to truck and update status
+        ...truckData.cargos.flatMap(cargo => [
+          { 
+            sql: 'INSERT INTO truck_cargo (truck_id, cargo_id) VALUES (?, ?)', 
+            params: [truckId, cargo.id] 
+          },
+          { 
+            sql: 'UPDATE cargo SET status = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?', 
+            params: ['shipped', cargo.id] 
+          }
+        ])
+      ];
 
-      // Link cargo to truck
-      for (const cargo of truckData.cargos) {
-        await dbRun(`
-          INSERT INTO truck_cargo (truck_id, cargo_id)
-          VALUES (?, ?)
-        `, [truckId, cargo.id]);
-
-        // Update cargo status to shipped
-        await dbRun(`
-          UPDATE cargo SET status = 'shipped', updated_at = CURRENT_TIMESTAMP
-          WHERE id = ?
-        `, [cargo.id]);
-      }
+      await dbTransaction(operations);
 
       createdTrucks.push({
         id: truckId,
@@ -470,7 +550,10 @@ app.post('/api/trucks/load', async (req, res) => {
     res.json(createdTrucks);
   } catch (error) {
     console.error('Error loading cargo to trucks:', error);
-    res.status(500).json({ error: 'Failed to load cargo to trucks' });
+    res.status(500).json({ 
+      error: 'Failed to load cargo to trucks',
+      details: error.message 
+    });
   }
 });
 
