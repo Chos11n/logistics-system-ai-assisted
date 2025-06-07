@@ -20,7 +20,7 @@ const Sidebar: React.FC<SidebarProps> = ({ activePage, setActivePage }) => {
     },
     {
       id: 'input',
-      label: '输入货物信息',
+      label: '货物录入',
       icon: Package,
       permission: PERMISSIONS.INPUT_CARGO.id
     },

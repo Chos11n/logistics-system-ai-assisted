@@ -232,7 +232,7 @@ const InputCargoPage: React.FC = () => {
   return (
     <div className="p-6 max-w-3xl mx-auto slide-in">
       <header className="mb-6">
-        <h1 className="text-2xl font-bold text-blue-900">输入货物信息</h1>
+        <h1 className="text-2xl font-bold text-blue-900">货物录入</h1>
         <p className="text-gray-600">请填写以下表单以添加新货物信息到仓库</p>
       </header>
 
@@ -438,19 +438,6 @@ const InputCargoPage: React.FC = () => {
                 <label className="form-label flex items-center">
                   <input
                     type="checkbox"
-                    name="isCarryOver"
-                    checked={cargoData.isCarryOver}
-                    onChange={handleChange}
-                    className="mr-2"
-                  />
-                  是否为上次遗留货物
-                </label>
-              </div>
-
-              <div className="flex items-center">
-                <label className="form-label flex items-center">
-                  <input
-                    type="checkbox"
                     name="hasTimeLimit"
                     checked={cargoData.hasTimeLimit}
                     onChange={handleChange}
@@ -619,12 +606,6 @@ const InputCargoPage: React.FC = () => {
                   </span>
                 </div>
                 <div>
-                  <span className="text-gray-600">上次遗留：</span>
-                  <span className={`font-medium ${cargoData.isCarryOver ? 'text-orange-600' : 'text-gray-600'}`}>
-                    {cargoData.isCarryOver ? '是' : '否'}
-                  </span>
-                </div>
-                <div>
                   <span className="text-gray-600">时效考核：</span>
                   <span className={`font-medium ${cargoData.hasTimeLimit ? 'text-red-600' : 'text-gray-600'}`}>
                     {cargoData.hasTimeLimit ? `是 (${cargoData.timeLimitDate})` : '否'}
@@ -655,7 +636,7 @@ const InputCargoPage: React.FC = () => {
                 • 轻货：≤200kg/m³<br/>
                 • 重泡货：≤250kg/m³<br/>
                 • 重货：≤350kg/m³<br/>
-                • 特重货：&gt;350kg/m³
+                • 特重货：>350kg/m³
               </p>
             </div>
             
