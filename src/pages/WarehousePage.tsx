@@ -327,7 +327,7 @@ const WarehousePage: React.FC = () => {
     const indicators = [];
     
     if (cargo.urgent) {
-      indicators.push(<span key="urgent" className="text-red-600 font-bold">🚨 急货</span>);
+      indicators.push(<span key="urgent\" className="text-red-600 font-bold">🚨 急货</span>);
     }
     
     if (cargo.isCarryOver) {
