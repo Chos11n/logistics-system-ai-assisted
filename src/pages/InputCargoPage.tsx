@@ -427,7 +427,7 @@ const InputCargoPage: React.FC = () => {
                 • 轻货：≤200kg/m³<br/>
                 • 重泡货：≤250kg/m³<br/>
                 • 重货：≤350kg/m³<br/>
-                • 特重货：>350kg/m³
+                • 特重货：&gt;350kg/m³
               </p>
             </div>
             
