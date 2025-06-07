@@ -16,6 +16,9 @@ export interface Cargo {
   selected?: boolean;
   truckId?: string;
   customerId?: string;
+  hasTimeLimit?: boolean; // 是否有时效考核
+  timeLimitDate?: string; // 时效考核截止日期
+  isCarryOver?: boolean; // 是否为上次遗留货物
 }
 
 export type CargoType = '特轻货' | '轻货' | '重泡货' | '重货' | '特重货';
@@ -112,4 +115,56 @@ export const getCustomerPriority = (customerType: Customer['type']): number => {
     case 'small': return 1;
     default: return 0;
   }
+};
+
+// 计算货物的综合优先级分数
+export const calculateCargoPriority = (cargo: Cargo, customers: Customer[]): number => {
+  let score = 0;
+  
+  // 1. 急货优先 (最高优先级)
+  if (cargo.urgent) {
+    score += 1000;
+  }
+  
+  // 2. 上次遗留优先
+  if (cargo.isCarryOver) {
+    score += 800;
+  }
+  
+  // 3. 有时效考核的货物优先
+  if (cargo.hasTimeLimit && cargo.timeLimitDate) {
+    const timeLimitDate = new Date(cargo.timeLimitDate);
+    const now = new Date();
+    const daysUntilDeadline = Math.ceil((timeLimitDate.getTime() - now.getTime()) / (1000 * 60 * 60 * 24));
+    
+    if (daysUntilDeadline <= 0) {
+      // 已过期，最高优先级
+      score += 600;
+    } else if (daysUntilDeadline <= 1) {
+      // 1天内到期
+      score += 500;
+    } else if (daysUntilDeadline <= 3) {
+      // 3天内到期
+      score += 400;
+    } else if (daysUntilDeadline <= 7) {
+      // 7天内到期
+      score += 300;
+    } else {
+      // 有时效但还有时间
+      score += 200;
+    }
+  }
+  
+  // 4. 大客户优先
+  const customer = customers.find(c => c.id === cargo.customerId);
+  if (customer) {
+    score += getCustomerPriority(customer.type) * 50;
+  }
+  
+  // 5. 先到优先 (按日期，越早的分数越高)
+  const cargoDate = new Date(cargo.date);
+  const daysSinceArrival = Math.floor((Date.now() - cargoDate.getTime()) / (1000 * 60 * 60 * 24));
+  score += Math.min(daysSinceArrival, 30); // 最多30分
+  
+  return score;
 };

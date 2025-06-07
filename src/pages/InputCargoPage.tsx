@@ -23,7 +23,10 @@ const InputCargoPage: React.FC = () => {
     notes: '',
     date: new Date().toISOString().split('T')[0],
     category: '',
-    urgent: false
+    urgent: false,
+    hasTimeLimit: false,
+    timeLimitDate: '',
+    isCarryOver: false
   });
 
   const [newCustomerData, setNewCustomerData] = useState({
@@ -152,6 +155,12 @@ const InputCargoPage: React.FC = () => {
       alert('请输入有效的重量');
       return;
     }
+
+    // Validate time limit
+    if (cargoData.hasTimeLimit && !cargoData.timeLimitDate) {
+      alert('请选择时效考核截止日期');
+      return;
+    }
     
     // Show confirmation dialog
     setShowConfirmDialog(true);
@@ -186,7 +195,10 @@ const InputCargoPage: React.FC = () => {
         notes: '',
         date: new Date().toISOString().split('T')[0],
         category: '',
-        urgent: false
+        urgent: false,
+        hasTimeLimit: false,
+        timeLimitDate: '',
+        isCarryOver: false
       });
       setCalculatedCargoType('');
       setSelectedCustomer('');
@@ -407,17 +419,61 @@ const InputCargoPage: React.FC = () => {
               </div>
             )}
 
-            <div className="flex items-center mt-4">
-              <label className="form-label flex items-center">
-                <input
-                  type="checkbox"
-                  name="urgent"
-                  checked={cargoData.urgent}
-                  onChange={handleChange}
-                  className="mr-2"
-                />
-                是否紧急
-              </label>
+            {/* 特殊属性设置 */}
+            <div className="md:col-span-2 space-y-4">
+              <div className="flex items-center">
+                <label className="form-label flex items-center">
+                  <input
+                    type="checkbox"
+                    name="urgent"
+                    checked={cargoData.urgent}
+                    onChange={handleChange}
+                    className="mr-2"
+                  />
+                  是否紧急
+                </label>
+              </div>
+
+              <div className="flex items-center">
+                <label className="form-label flex items-center">
+                  <input
+                    type="checkbox"
+                    name="isCarryOver"
+                    checked={cargoData.isCarryOver}
+                    onChange={handleChange}
+                    className="mr-2"
+                  />
+                  是否为上次遗留货物
+                </label>
+              </div>
+
+              <div className="flex items-center">
+                <label className="form-label flex items-center">
+                  <input
+                    type="checkbox"
+                    name="hasTimeLimit"
+                    checked={cargoData.hasTimeLimit}
+                    onChange={handleChange}
+                    className="mr-2"
+                  />
+                  是否有时效考核
+                </label>
+              </div>
+
+              {cargoData.hasTimeLimit && (
+                <div>
+                  <label htmlFor="timeLimitDate" className="form-label">时效考核截止日期</label>
+                  <input
+                    type="date"
+                    id="timeLimitDate"
+                    name="timeLimitDate"
+                    value={cargoData.timeLimitDate}
+                    onChange={handleChange}
+                    className="form-input"
+                    required={cargoData.hasTimeLimit}
+                  />
+                </div>
+              )}
             </div>
             
             <div className="md:col-span-2">
@@ -560,6 +616,18 @@ const InputCargoPage: React.FC = () => {
                   <span className="text-gray-600">紧急程度：</span>
                   <span className={`font-medium ${cargoData.urgent ? 'text-red-600' : 'text-green-600'}`}>
                     {cargoData.urgent ? '紧急' : '普通'}
+                  </span>
+                </div>
+                <div>
+                  <span className="text-gray-600">上次遗留：</span>
+                  <span className={`font-medium ${cargoData.isCarryOver ? 'text-orange-600' : 'text-gray-600'}`}>
+                    {cargoData.isCarryOver ? '是' : '否'}
+                  </span>
+                </div>
+                <div>
+                  <span className="text-gray-600">时效考核：</span>
+                  <span className={`font-medium ${cargoData.hasTimeLimit ? 'text-red-600' : 'text-gray-600'}`}>
+                    {cargoData.hasTimeLimit ? `是 (${cargoData.timeLimitDate})` : '否'}
                   </span>
                 </div>
               </div>

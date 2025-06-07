@@ -2,20 +2,18 @@ import React, { useState, useMemo } from 'react';
 import { useCargo } from '../context/CargoContext';
 import { format } from 'date-fns';
 import { zhCN } from 'date-fns/locale';
-import { Truck as TruckType, Customer, getCustomerPriority } from '../types/CargoTypes';
+import { Truck as TruckType, Customer, calculateCargoPriority } from '../types/CargoTypes';
+import { AlertTriangle, Truck, Clock } from 'lucide-react';
 import * as XLSX from 'xlsx';
 
 const WarehousePage: React.FC = () => {
-  const { warehouseItems, shipCargo, loadToTruck } = useCargo();
+  const { warehouseItems, loadToTruck } = useCargo();
   const [searchTerm, setSearchTerm] = useState('');
   const [searchUrgent, setSearchUrgent] = useState<'all' | 'urgent' | 'normal'>('all');
-  const [confirmShipId, setConfirmShipId] = useState<string | null>(null);
-  const [confirmLoadId, setConfirmLoadId] = useState<string | null>(null);
-  const [isBatchMode, setIsBatchMode] = useState(false);
   const [selectedItems, setSelectedItems] = useState<Set<string>>(new Set());
   const [hoveredItem, setHoveredItem] = useState<string | null>(null);
-  const [showBatchConfirm, setShowBatchConfirm] = useState(false);
   const [showSmartLoadDialog, setShowSmartLoadDialog] = useState(false);
+  const [showEmergencyPage, setShowEmergencyPage] = useState(false);
   const [loadingPlan, setLoadingPlan] = useState<any[]>([]);
   const [trucks, setTrucks] = useState<TruckType[]>([]);
   const [customers, setCustomers] = useState<Customer[]>([]);
@@ -77,28 +75,13 @@ const WarehousePage: React.FC = () => {
     }), { totalQuantity: 0, totalVolume: 0, totalWeight: 0 });
   }, [warehouseItems, selectedItems]);
 
-  // 智能装车算法 - 以车为导向，考虑客户优先级
+  // 智能装车算法 - 按五个优先级排序
   const smartLoadingAlgorithm = (selectedCargos: any[], availableTrucks: TruckType[]) => {
-    // 按客户优先级和紧急程度排序货物
+    // 按综合优先级排序货物
     const sortedCargos = [...selectedCargos].sort((a, b) => {
-      const aCustomer = customers.find(c => c.id === a.customerId);
-      const bCustomer = customers.find(c => c.id === b.customerId);
-      
-      const aPriority = getCustomerPriority(aCustomer?.type || 'small');
-      const bPriority = getCustomerPriority(bCustomer?.type || 'small');
-      
-      // 首先按客户优先级排序
-      if (aPriority !== bPriority) {
-        return bPriority - aPriority;
-      }
-      
-      // 然后按紧急程度排序
-      if (a.urgent !== b.urgent) {
-        return a.urgent ? -1 : 1;
-      }
-      
-      // 最后按体积排序（大的优先）
-      return b.volume - a.volume;
+      const aPriority = calculateCargoPriority(a, customers);
+      const bPriority = calculateCargoPriority(b, customers);
+      return bPriority - aPriority; // 高优先级在前
     });
 
     // 按可用载重排序货车（大的优先）
@@ -178,15 +161,12 @@ const WarehousePage: React.FC = () => {
     setSelectedItems(newSelected);
   };
 
-  const handleBatchShip = () => {
-    selectedItems.forEach(id => {
-      shipCargo(id);
-    });
-    setSelectedItems(new Set());
-    setIsBatchMode(false);
-  };
-
   const handleSmartLoad = () => {
+    if (selectedItems.size === 0) {
+      alert('请先选择要装车的货物');
+      return;
+    }
+
     const selectedCargos = warehouseItems.filter(item => selectedItems.has(item.id));
     const availableTrucks = trucks.filter(truck => truck.status === 'available');
     
@@ -208,10 +188,8 @@ const WarehousePage: React.FC = () => {
 
   const confirmSmartLoad = async () => {
     try {
-      // 这里应该调用后端API来执行装车
-      // 暂时使用前端逻辑模拟
+      // 更新货车状态为装载中
       for (const plan of loadingPlan) {
-        // 更新货车状态为装载中
         const updatedTrucks = trucks.map(truck => 
           truck.id === plan.truck.id 
             ? { ...truck, status: 'loading' as const }
@@ -221,13 +199,11 @@ const WarehousePage: React.FC = () => {
         localStorage.setItem('trucks', JSON.stringify(updatedTrucks));
 
         // 将货物标记为已装车
-        for (const cargo of plan.cargos) {
-          await loadToTruck([cargo.id]);
-        }
+        const cargoIds = plan.cargos.map((cargo: any) => cargo.id);
+        await loadToTruck(cargoIds);
       }
 
       setSelectedItems(new Set());
-      setIsBatchMode(false);
       setShowSmartLoadDialog(false);
       setLoadingPlan([]);
       
@@ -263,6 +239,46 @@ const WarehousePage: React.FC = () => {
     return customers.find(c => c.id === customerId);
   };
 
+  const getPriorityIndicator = (cargo: any) => {
+    const indicators = [];
+    
+    if (cargo.urgent) {
+      indicators.push(<span key="urgent" className="text-red-600 font-bold">🚨 急货</span>);
+    }
+    
+    if (cargo.isCarryOver) {
+      indicators.push(<span key="carryover" className="text-orange-600 font-bold">📦 遗留</span>);
+    }
+    
+    if (cargo.hasTimeLimit) {
+      const timeLimitDate = new Date(cargo.timeLimitDate);
+      const now = new Date();
+      const daysUntilDeadline = Math.ceil((timeLimitDate.getTime() - now.getTime()) / (1000 * 60 * 60 * 24));
+      
+      if (daysUntilDeadline <= 0) {
+        indicators.push(<span key="overdue" className="text-red-800 font-bold">⏰ 已过期</span>);
+      } else if (daysUntilDeadline <= 1) {
+        indicators.push(<span key="urgent-time" className="text-red-600 font-bold">⏰ 1天内</span>);
+      } else if (daysUntilDeadline <= 3) {
+        indicators.push(<span key="warning-time" className="text-orange-600 font-bold">⏰ 3天内</span>);
+      } else {
+        indicators.push(<span key="time-limit" className="text-blue-600">⏰ 有时效</span>);
+      }
+    }
+    
+    return indicators;
+  };
+
+  if (showEmergencyPage) {
+    return (
+      <EmergencyShipmentPage 
+        warehouseItems={warehouseItems}
+        onBack={() => setShowEmergencyPage(false)}
+        customers={customers}
+      />
+    );
+  }
+
   return (
     <div className="p-6 max-w-6xl mx-auto slide-in">
       <header className="mb-6">
@@ -286,7 +302,7 @@ const WarehousePage: React.FC = () => {
       </div>
 
       {/* 选中货物统计 */}
-      {isBatchMode && selectedItems.size > 0 && (
+      {selectedItems.size > 0 && (
         <div className="card bg-green-50 border-green-200 mb-6">
           <h3 className="text-lg font-semibold text-green-900 mb-3">已选择货物统计</h3>
           <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
@@ -340,23 +356,19 @@ const WarehousePage: React.FC = () => {
         
         <div className="flex gap-2">
           <button
-            onClick={() => {
-              setIsBatchMode(!isBatchMode);
-              setSelectedItems(new Set());
-            }}
-            className={`btn-secondary ${isBatchMode ? 'bg-blue-100 border-blue-300' : ''}`}
+            onClick={() => setShowEmergencyPage(true)}
+            className="btn-warning flex items-center gap-2"
           >
-            {isBatchMode ? '退出批量模式' : '批量操作'}
+            <AlertTriangle size={16} />
+            紧急送出
           </button>
           
-          {isBatchMode && (
-            <button
-              onClick={handleSelectAll}
-              className="btn-secondary"
-            >
-              {selectedItems.size === warehouseItems.length ? '取消全选' : '全选'}
-            </button>
-          )}
+          <button
+            onClick={handleSelectAll}
+            className="btn-secondary"
+          >
+            {selectedItems.size === warehouseItems.length ? '取消全选' : '全选'}
+          </button>
         </div>
       </div>
 
@@ -373,32 +385,29 @@ const WarehousePage: React.FC = () => {
                 <h3 className="text-lg font-semibold text-blue-900">
                   {format(new Date(date), 'yyyy年MM月dd日', { locale: zhCN })}
                 </h3>
-                {isBatchMode && (
-                  <div className="flex items-center gap-4">
-                    <span className="text-sm text-gray-600">
-                      本日期: {items.filter(item => selectedItems.has(item.id)).length} / {items.length} 已选
-                    </span>
-                    <button
-                      onClick={() => handleSelectDate(date)}
-                      className="text-sm text-blue-600 hover:text-blue-800 font-medium"
-                    >
-                      {items.every(item => selectedItems.has(item.id)) ? '取消选择本日期' : '选择本日期'}
-                    </button>
-                  </div>
-                )}
+                <div className="flex items-center gap-4">
+                  <span className="text-sm text-gray-600">
+                    本日期: {items.filter(item => selectedItems.has(item.id)).length} / {items.length} 已选
+                  </span>
+                  <button
+                    onClick={() => handleSelectDate(date)}
+                    className="text-sm text-blue-600 hover:text-blue-800 font-medium"
+                  >
+                    {items.every(item => selectedItems.has(item.id)) ? '取消选择本日期' : '选择本日期'}
+                  </button>
+                </div>
               </div>
               
               <div className="table-container">
                 <table className="data-table">
                   <thead>
                     <tr>
-                      {isBatchMode && <th className="w-12">选择</th>}
-                      <th>操作</th>
+                      <th className="w-12">选择</th>
+                      <th>优先级</th>
                       <th>姓名</th>
                       <th>厂家/客户</th>
                       <th>货型</th>
                       <th>种类</th>
-                      <th>紧急</th>
                       <th>件数</th>
                       <th>立方 (m³)</th>
                       <th>吨位 (t)</th>
@@ -408,81 +417,29 @@ const WarehousePage: React.FC = () => {
                   <tbody>
                     {items.map((cargo) => {
                       const customerInfo = getCustomerInfo(cargo.customerId);
+                      const priorityIndicators = getPriorityIndicator(cargo);
+                      
                       return (
                         <tr 
                           key={cargo.id} 
                           className={`
-                            ${confirmShipId === cargo.id || confirmLoadId === cargo.id ? 'bg-red-50' : ''}
                             ${selectedItems.has(cargo.id) ? 'bg-blue-50 border-blue-200' : ''}
-                            ${isBatchMode ? 'cursor-pointer hover:bg-gray-50' : ''}
+                            cursor-pointer hover:bg-gray-50
                           `}
-                          onClick={isBatchMode ? () => handleSelectItem(cargo.id) : undefined}
+                          onClick={() => handleSelectItem(cargo.id)}
                         >
-                          {isBatchMode && (
-                            <td onClick={(e) => e.stopPropagation()}>
-                              <input
-                                type="checkbox"
-                                checked={selectedItems.has(cargo.id)}
-                                onChange={() => handleSelectItem(cargo.id)}
-                                className="w-4 h-4 text-blue-600 rounded focus:ring-blue-500"
-                              />
-                            </td>
-                          )}
                           <td onClick={(e) => e.stopPropagation()}>
-                            {!isBatchMode && (
-                              confirmShipId === cargo.id ? (
-                                <div className="confirm-actions">
-                                  <button
-                                    onClick={() => {
-                                      shipCargo(cargo.id);
-                                      setConfirmShipId(null);
-                                    }}
-                                    className="bg-red-500 hover:bg-red-600 text-white"
-                                  >
-                                    确认
-                                  </button>
-                                  <button
-                                    onClick={() => setConfirmShipId(null)}
-                                    className="bg-gray-200 hover:bg-gray-300 text-gray-700"
-                                  >
-                                    取消
-                                  </button>
-                                </div>
-                              ) : confirmLoadId === cargo.id ? (
-                                <div className="confirm-actions">
-                                  <button
-                                    onClick={() => {
-                                      loadToTruck([cargo.id]);
-                                      setConfirmLoadId(null);
-                                    }}
-                                    className="bg-green-500 hover:bg-green-600 text-white"
-                                  >
-                                    确认
-                                  </button>
-                                  <button
-                                    onClick={() => setConfirmLoadId(null)}
-                                    className="bg-gray-200 hover:bg-gray-300 text-gray-700"
-                                  >
-                                    取消
-                                  </button>
-                                </div>
-                              ) : (
-                                <div className="flex gap-1">
-                                  <button
-                                    onClick={() => setConfirmShipId(cargo.id)}
-                                    className="table-action-btn bg-blue-500 hover:bg-blue-600 text-white"
-                                  >
-                                    货物送出
-                                  </button>
-                                  <button
-                                    onClick={() => setConfirmLoadId(cargo.id)}
-                                    className="table-action-btn bg-green-500 hover:bg-green-600 text-white"
-                                  >
-                                    装车并出库
-                                  </button>
-                                </div>
-                              )
-                            )}
+                            <input
+                              type="checkbox"
+                              checked={selectedItems.has(cargo.id)}
+                              onChange={() => handleSelectItem(cargo.id)}
+                              className="w-4 h-4 text-blue-600 rounded focus:ring-blue-500"
+                            />
+                          </td>
+                          <td>
+                            <div className="flex flex-col gap-1 text-xs">
+                              {priorityIndicators}
+                            </div>
                           </td>
                           <td>{cargo.name}</td>
                           <td>
@@ -498,15 +455,6 @@ const WarehousePage: React.FC = () => {
                           </td>
                           <td>{cargo.cargoType}</td>
                           <td>{cargo.category}</td>
-                          <td>
-                            <span className={`px-2 py-1 rounded-full text-xs font-medium ${
-                              cargo.urgent 
-                                ? 'bg-red-100 text-red-800' 
-                                : 'bg-gray-100 text-gray-800'
-                            }`}>
-                              {cargo.urgent ? '紧急' : '普通'}
-                            </span>
-                          </td>
                           <td>{cargo.quantity}</td>
                           <td 
                             className="relative cursor-help"
@@ -534,32 +482,21 @@ const WarehousePage: React.FC = () => {
             </div>
           ))}
 
-          {/* 批量操作按钮 */}
-          {isBatchMode && selectedItems.size > 0 && (
-            <div className="batch-actions">
-              <button
-                onClick={handleBatchShip}
-                className="bg-red-500 hover:bg-red-600 text-white flex items-center gap-2"
-              >
-                <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 19l9 2-9-18-9 18 9-2zm0 0v-8" />
-                </svg>
-                批量送出 ({selectedItems.size})
-              </button>
+          {/* 智能装车按钮 */}
+          {selectedItems.size > 0 && (
+            <div className="fixed bottom-6 right-6 flex gap-2 z-10">
               <button
                 onClick={handleSmartLoad}
-                className="bg-green-500 hover:bg-green-600 text-white flex items-center gap-2"
+                className="bg-green-500 hover:bg-green-600 text-white flex items-center gap-2 px-6 py-3 rounded-lg shadow-lg"
               >
-                <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" />
-                </svg>
+                <Truck size={20} />
                 智能装车 ({selectedItems.size})
               </button>
               <button
                 onClick={handleExportExcel}
-                className="bg-blue-500 hover:bg-blue-600 text-white flex items-center gap-2"
+                className="bg-blue-500 hover:bg-blue-600 text-white flex items-center gap-2 px-6 py-3 rounded-lg shadow-lg"
               >
-                <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                   <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 10v6m0 0l-3-3m3 3l3-3m2 8H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
                 </svg>
                 导出Excel
@@ -574,9 +511,16 @@ const WarehousePage: React.FC = () => {
                 <h3 className="text-lg font-semibold text-gray-900 mb-4">智能装车方案</h3>
                 
                 <div className="mb-6">
-                  <p className="text-gray-600 mb-4">
-                    系统已为您生成最优装车方案，考虑了客户优先级、货物紧急程度和车辆载重：
-                  </p>
+                  <div className="bg-blue-50 border border-blue-200 rounded-lg p-4 mb-4">
+                    <h4 className="font-semibold text-blue-900 mb-2">装车优先级说明：</h4>
+                    <ol className="text-sm text-blue-800 space-y-1">
+                      <li>1. 急货优先 - 标记为紧急的货物</li>
+                      <li>2. 上次遗留优先 - 上次未能装车的货物</li>
+                      <li>3. 有时效考核优先 - 有截止日期要求的货物</li>
+                      <li>4. 大客户优先 - 大客户的货物优先装车</li>
+                      <li>5. 先到优先 - 按到达仓库的时间排序</li>
+                    </ol>
+                  </div>
                   
                   {loadingPlan.map((plan, index) => (
                     <div key={index} className="border rounded-lg p-4 mb-4">
@@ -605,22 +549,26 @@ const WarehousePage: React.FC = () => {
                         <p className="text-sm font-medium text-gray-700 mb-2">
                           装载货物 ({plan.cargos.length} 件)：
                         </p>
-                        <div className="grid grid-cols-1 md:grid-cols-2 gap-2 text-xs">
+                        <div className="space-y-2 text-xs">
                           {plan.cargos.map((cargo: any) => {
                             const customerInfo = getCustomerInfo(cargo.customerId);
+                            const priorityIndicators = getPriorityIndicator(cargo);
+                            
                             return (
-                              <div key={cargo.id} className="flex justify-between">
-                                <span>
-                                  {cargo.name} - {cargo.manufacturer}
+                              <div key={cargo.id} className="flex justify-between items-center p-2 bg-white rounded">
+                                <div>
+                                  <span className="font-medium">{cargo.name} - {cargo.manufacturer}</span>
                                   {customerInfo && (
-                                    <span className="ml-1">
+                                    <span className="ml-2 text-gray-600">
                                       ({customerInfo.type === 'large' ? '大客户' : 
                                         customerInfo.type === 'medium' ? '中客户' : '小客户'})
                                     </span>
                                   )}
-                                  {cargo.urgent && <span className="text-red-600 ml-1">[紧急]</span>}
-                                </span>
-                                <span>{cargo.weight}t / {cargo.volume.toFixed(2)}m³</span>
+                                  <div className="flex gap-2 mt-1">
+                                    {priorityIndicators}
+                                  </div>
+                                </div>
+                                <span className="text-gray-600">{cargo.weight}t / {cargo.volume.toFixed(2)}m³</span>
                               </div>
                             );
                           })}
@@ -649,6 +597,174 @@ const WarehousePage: React.FC = () => {
           )}
         </>
       )}
+    </div>
+  );
+};
+
+// 紧急送出页面组件
+const EmergencyShipmentPage: React.FC<{
+  warehouseItems: any[];
+  onBack: () => void;
+  customers: any[];
+}> = ({ warehouseItems, onBack, customers }) => {
+  const { shipCargo } = useCargo();
+  const [selectedItems, setSelectedItems] = useState<Set<string>>(new Set());
+  const [searchTerm, setSearchTerm] = useState('');
+
+  const filteredItems = warehouseItems.filter(item =>
+    item.name.includes(searchTerm) ||
+    item.manufacturer.includes(searchTerm) ||
+    item.category.includes(searchTerm)
+  );
+
+  const handleSelectItem = (id: string) => {
+    const newSelected = new Set(selectedItems);
+    if (newSelected.has(id)) {
+      newSelected.delete(id);
+    } else {
+      newSelected.add(id);
+    }
+    setSelectedItems(newSelected);
+  };
+
+  const handleEmergencyShip = async () => {
+    if (selectedItems.size === 0) {
+      alert('请选择要送出的货物');
+      return;
+    }
+
+    if (confirm(`确定要紧急送出 ${selectedItems.size} 件货物吗？`)) {
+      try {
+        for (const id of selectedItems) {
+          await shipCargo(id);
+        }
+        alert('货物已成功送出！');
+        onBack();
+      } catch (error) {
+        alert('送出失败，请重试');
+      }
+    }
+  };
+
+  const getCustomerInfo = (customerId?: string) => {
+    if (!customerId) return null;
+    return customers.find(c => c.id === customerId);
+  };
+
+  return (
+    <div className="p-6 max-w-6xl mx-auto slide-in">
+      <header className="mb-6">
+        <div className="flex items-center gap-4">
+          <button onClick={onBack} className="btn-secondary">
+            ← 返回仓库
+          </button>
+          <div>
+            <h1 className="text-2xl font-bold text-red-900 flex items-center gap-2">
+              <AlertTriangle size={28} />
+              紧急送出
+            </h1>
+            <p className="text-gray-600">人工选择货物进行紧急送出</p>
+          </div>
+        </div>
+      </header>
+
+      <div className="flex justify-between items-center mb-6">
+        <div className="relative w-64">
+          <input
+            type="text"
+            placeholder="搜索货物..."
+            value={searchTerm}
+            onChange={(e) => setSearchTerm(e.target.value)}
+            className="form-input pl-10"
+          />
+          <div className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400">
+            <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
+            </svg>
+          </div>
+        </div>
+
+        {selectedItems.size > 0 && (
+          <button
+            onClick={handleEmergencyShip}
+            className="btn-danger flex items-center gap-2"
+          >
+            <AlertTriangle size={16} />
+            紧急送出 ({selectedItems.size})
+          </button>
+        )}
+      </div>
+
+      <div className="table-container">
+        <table className="data-table">
+          <thead>
+            <tr>
+              <th className="w-12">选择</th>
+              <th>姓名</th>
+              <th>厂家/客户</th>
+              <th>货型</th>
+              <th>种类</th>
+              <th>紧急</th>
+              <th>件数</th>
+              <th>立方 (m³)</th>
+              <th>吨位 (t)</th>
+              <th>备注</th>
+            </tr>
+          </thead>
+          <tbody>
+            {filteredItems.map((cargo) => {
+              const customerInfo = getCustomerInfo(cargo.customerId);
+              
+              return (
+                <tr 
+                  key={cargo.id} 
+                  className={`
+                    ${selectedItems.has(cargo.id) ? 'bg-red-50 border-red-200' : ''}
+                    cursor-pointer hover:bg-gray-50
+                  `}
+                  onClick={() => handleSelectItem(cargo.id)}
+                >
+                  <td onClick={(e) => e.stopPropagation()}>
+                    <input
+                      type="checkbox"
+                      checked={selectedItems.has(cargo.id)}
+                      onChange={() => handleSelectItem(cargo.id)}
+                      className="w-4 h-4 text-red-600 rounded focus:ring-red-500"
+                    />
+                  </td>
+                  <td>{cargo.name}</td>
+                  <td>
+                    <div>
+                      <span>{cargo.manufacturer}</span>
+                      {customerInfo && (
+                        <div className="text-xs text-gray-500">
+                          {customerInfo.type === 'large' ? '🔴 大客户' : 
+                           customerInfo.type === 'medium' ? '🟡 中客户' : '🟢 小客户'}
+                        </div>
+                      )}
+                    </div>
+                  </td>
+                  <td>{cargo.cargoType}</td>
+                  <td>{cargo.category}</td>
+                  <td>
+                    <span className={`px-2 py-1 rounded-full text-xs font-medium ${
+                      cargo.urgent 
+                        ? 'bg-red-100 text-red-800' 
+                        : 'bg-gray-100 text-gray-800'
+                    }`}>
+                      {cargo.urgent ? '紧急' : '普通'}
+                    </span>
+                  </td>
+                  <td>{cargo.quantity}</td>
+                  <td>{cargo.volume.toFixed(2)}</td>
+                  <td>{cargo.weight}</td>
+                  <td>{cargo.notes}</td>
+                </tr>
+              );
+            })}
+          </tbody>
+        </table>
+      </div>
     </div>
   );
 };
