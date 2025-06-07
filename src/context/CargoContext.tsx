@@ -15,6 +15,7 @@ interface CargoContextType {
   undoShipment: (id: string) => Promise<void>;
   refreshData: () => Promise<void>;
   checkServerHealth: () => Promise<void>;
+  markAsCarryOver: (cargoIds: string[]) => void;
 }
 
 const CargoContext = createContext<CargoContextType | undefined>(undefined);
@@ -50,6 +51,17 @@ export const CargoProvider: React.FC<CargoProviderProps> = ({ children }) => {
       setServerStatus('disconnected');
       console.error('❌ Server health check failed:', err);
     }
+  };
+
+  // 标记货物为上次遗留
+  const markAsCarryOver = (cargoIds: string[]) => {
+    setWarehouseItems(items => 
+      items.map(item => 
+        cargoIds.includes(item.id) 
+          ? { ...item, isCarryOver: true }
+          : item
+      )
+    );
   };
 
   // Load data from API with better error handling
@@ -279,7 +291,8 @@ export const CargoProvider: React.FC<CargoProviderProps> = ({ children }) => {
       loadToTruck,
       undoShipment,
       refreshData,
-      checkServerHealth
+      checkServerHealth,
+      markAsCarryOver
     }}>
       {children}
     </CargoContext.Provider>

@@ -8,16 +8,22 @@ import HistoryPage from './pages/HistoryPage';
 import TrucksPage from './pages/TrucksPage';
 import TruckManagementPage from './pages/TruckManagementPage';
 import CustomerManagementPage from './pages/CustomerManagementPage';
+import AccountManagementPage from './pages/AccountManagementPage';
 import LoadingSpinner from './components/LoadingSpinner';
 import ErrorMessage from './components/ErrorMessage';
+import LoginModal from './components/LoginModal';
+import UserAvatar from './components/UserAvatar';
 import { CargoProvider, useCargo } from './context/CargoContext';
+import { AuthProvider, useAuth } from './context/AuthContext';
 import { healthAPI } from './services/api';
 import './App.css';
 
 function AppContent() {
   const [activePage, setActivePage] = useState('home');
   const [serverStatus, setServerStatus] = useState<'checking' | 'online' | 'offline'>('checking');
+  const [showLoginModal, setShowLoginModal] = useState(false);
   const { loading, error } = useCargo();
+  const { isAuthenticated, user } = useAuth();
 
   useEffect(() => {
     document.title = '环亚物流内部货物管理系统';
@@ -40,6 +46,29 @@ function AppContent() {
     return () => clearInterval(interval);
   }, []);
 
+  // 如果未登录，显示登录界面
+  if (!isAuthenticated) {
+    return (
+      <div className="min-h-screen bg-gray-50 flex items-center justify-center">
+        <div className="text-center">
+          <h1 className="text-3xl font-bold text-blue-900 mb-4">环亚物流内部货物管理系统</h1>
+          <p className="text-gray-600 mb-8">请登录以继续使用系统</p>
+          <button
+            onClick={() => setShowLoginModal(true)}
+            className="btn-primary px-8 py-3 text-lg"
+          >
+            登录系统
+          </button>
+        </div>
+        
+        <LoginModal
+          isOpen={showLoginModal}
+          onClose={() => setShowLoginModal(false)}
+        />
+      </div>
+    );
+  }
+
   const renderPage = () => {
     switch (activePage) {
       case 'home':
@@ -54,6 +83,8 @@ function AppContent() {
         return <TruckManagementPage />;
       case 'customer-management':
         return <CustomerManagementPage />;
+      case 'account-management':
+        return <AccountManagementPage />;
       case 'history':
         return <HistoryPage />;
       default:
@@ -65,8 +96,9 @@ function AppContent() {
     <div className="flex h-screen bg-gray-50">
       <Sidebar activePage={activePage} setActivePage={setActivePage} />
       <main className="flex-1 overflow-auto relative">
-        {/* Server Status Indicator */}
-        <div className="absolute top-4 right-4 z-50">
+        {/* 顶部状态栏 */}
+        <div className="absolute top-4 right-4 z-50 flex items-center gap-4">
+          {/* Server Status Indicator */}
           <div className={`flex items-center gap-2 px-3 py-1 rounded-full text-xs font-medium ${
             serverStatus === 'online' 
               ? 'bg-green-100 text-green-800' 
@@ -85,6 +117,9 @@ function AppContent() {
             {serverStatus === 'online' && '服务器在线'}
             {serverStatus === 'offline' && '离线模式'}
           </div>
+
+          {/* User Avatar */}
+          <UserAvatar />
         </div>
 
         {/* Global Loading Indicator */}
@@ -113,9 +148,11 @@ function AppContent() {
 
 function App() {
   return (
-    <CargoProvider>
-      <AppContent />
-    </CargoProvider>
+    <AuthProvider>
+      <CargoProvider>
+        <AppContent />
+      </CargoProvider>
+    </AuthProvider>
   );
 }
 
