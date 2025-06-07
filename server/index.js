@@ -309,56 +309,137 @@ app.delete('/api/cargo/:id', async (req, res) => {
   }
 });
 
-// Clear all warehouse cargo - IMPROVED WITH TRANSACTION
+// Clear all warehouse cargo - IMPROVED WITH BETTER ERROR HANDLING
 app.delete('/api/cargo/clear-warehouse', async (req, res) => {
   try {
-    console.log('Starting warehouse clear operation...');
+    console.log('🗑️ Starting warehouse clear operation...');
     
+    // First, check if database is available
+    if (!db) {
+      console.error('❌ Database not available');
+      return res.status(500).json({ 
+        error: 'Database not available',
+        details: 'Database connection is not initialized'
+      });
+    }
+
+    // Check current warehouse items count
+    const warehouseCount = await dbGet('SELECT COUNT(*) as count FROM cargo WHERE status = ?', ['warehouse']);
+    console.log(`📦 Found ${warehouseCount.count} warehouse items to clear`);
+
+    if (warehouseCount.count === 0) {
+      console.log('✅ Warehouse is already empty');
+      return res.json({ 
+        message: 'Warehouse is already empty', 
+        timestamp: new Date().toISOString(),
+        itemsCleared: 0
+      });
+    }
+
     // Use transaction to ensure data consistency
     const operations = [
-      { sql: 'DELETE FROM truck_cargo WHERE cargo_id IN (SELECT id FROM cargo WHERE status = ?)', params: ['warehouse'] },
-      { sql: 'DELETE FROM cargo WHERE status = ?', params: ['warehouse'] }
+      { 
+        sql: 'DELETE FROM truck_cargo WHERE cargo_id IN (SELECT id FROM cargo WHERE status = ?)', 
+        params: ['warehouse'] 
+      },
+      { 
+        sql: 'DELETE FROM cargo WHERE status = ?', 
+        params: ['warehouse'] 
+      }
     ];
 
+    console.log('🔄 Executing database transaction...');
     await dbTransaction(operations);
     
-    console.log('Warehouse cleared successfully');
+    // Verify the operation
+    const remainingCount = await dbGet('SELECT COUNT(*) as count FROM cargo WHERE status = ?', ['warehouse']);
+    console.log(`✅ Warehouse cleared successfully. Remaining items: ${remainingCount.count}`);
+    
     res.json({ 
       message: 'Warehouse cleared successfully', 
-      timestamp: new Date().toISOString()
+      timestamp: new Date().toISOString(),
+      itemsCleared: warehouseCount.count,
+      remainingItems: remainingCount.count
     });
   } catch (error) {
-    console.error('Error clearing warehouse:', error);
+    console.error('❌ Error clearing warehouse:', error);
+    
+    // Provide detailed error information
+    let errorMessage = 'Failed to clear warehouse';
+    let errorDetails = error.message;
+    
+    if (error.code === 'SQLITE_BUSY') {
+      errorMessage = 'Database is busy, please try again';
+      errorDetails = 'Another operation is currently using the database';
+    } else if (error.code === 'SQLITE_LOCKED') {
+      errorMessage = 'Database is locked, please try again';
+      errorDetails = 'Database is locked by another process';
+    }
+    
     res.status(500).json({ 
-      error: 'Failed to clear warehouse',
-      details: error.message 
+      error: errorMessage,
+      details: errorDetails,
+      code: error.code || 'UNKNOWN_ERROR',
+      timestamp: new Date().toISOString()
     });
   }
 });
 
-// Clear all shipped cargo - IMPROVED WITH TRANSACTION
+// Clear all shipped cargo - IMPROVED WITH BETTER ERROR HANDLING
 app.delete('/api/cargo/clear-shipped', async (req, res) => {
   try {
-    console.log('Starting shipped cargo clear operation...');
+    console.log('🗑️ Starting shipped cargo clear operation...');
     
-    // Use transaction to ensure data consistency
+    if (!db) {
+      console.error('❌ Database not available');
+      return res.status(500).json({ 
+        error: 'Database not available',
+        details: 'Database connection is not initialized'
+      });
+    }
+
+    const shippedCount = await dbGet('SELECT COUNT(*) as count FROM cargo WHERE status = ?', ['shipped']);
+    console.log(`📦 Found ${shippedCount.count} shipped items to clear`);
+
+    if (shippedCount.count === 0) {
+      console.log('✅ No shipped items to clear');
+      return res.json({ 
+        message: 'No shipped items to clear', 
+        timestamp: new Date().toISOString(),
+        itemsCleared: 0
+      });
+    }
+
     const operations = [
-      { sql: 'DELETE FROM truck_cargo WHERE cargo_id IN (SELECT id FROM cargo WHERE status = ?)', params: ['shipped'] },
-      { sql: 'DELETE FROM cargo WHERE status = ?', params: ['shipped'] }
+      { 
+        sql: 'DELETE FROM truck_cargo WHERE cargo_id IN (SELECT id FROM cargo WHERE status = ?)', 
+        params: ['shipped'] 
+      },
+      { 
+        sql: 'DELETE FROM cargo WHERE status = ?', 
+        params: ['shipped'] 
+      }
     ];
 
+    console.log('🔄 Executing database transaction...');
     await dbTransaction(operations);
     
-    console.log('Shipped cargo cleared successfully');
+    const remainingCount = await dbGet('SELECT COUNT(*) as count FROM cargo WHERE status = ?', ['shipped']);
+    console.log(`✅ Shipped cargo cleared successfully. Remaining items: ${remainingCount.count}`);
+    
     res.json({ 
       message: 'Shipped cargo cleared successfully', 
-      timestamp: new Date().toISOString()
+      timestamp: new Date().toISOString(),
+      itemsCleared: shippedCount.count,
+      remainingItems: remainingCount.count
     });
   } catch (error) {
-    console.error('Error clearing shipped cargo:', error);
+    console.error('❌ Error clearing shipped cargo:', error);
     res.status(500).json({ 
       error: 'Failed to clear shipped cargo',
-      details: error.message 
+      details: error.message,
+      code: error.code || 'UNKNOWN_ERROR',
+      timestamp: new Date().toISOString()
     });
   }
 });
@@ -385,30 +466,56 @@ app.get('/api/trucks', async (req, res) => {
   }
 });
 
-// Clear all truck records - IMPROVED WITH TRANSACTION
+// Clear all truck records - IMPROVED WITH BETTER ERROR HANDLING
 app.delete('/api/trucks/clear-all', async (req, res) => {
   try {
-    console.log('Starting truck records clear operation...');
+    console.log('🗑️ Starting truck records clear operation...');
     
-    // Use transaction to ensure data consistency
+    if (!db) {
+      console.error('❌ Database not available');
+      return res.status(500).json({ 
+        error: 'Database not available',
+        details: 'Database connection is not initialized'
+      });
+    }
+
+    const truckCount = await dbGet('SELECT COUNT(*) as count FROM trucks');
+    console.log(`🚛 Found ${truckCount.count} truck records to clear`);
+
+    if (truckCount.count === 0) {
+      console.log('✅ No truck records to clear');
+      return res.json({ 
+        message: 'No truck records to clear', 
+        timestamp: new Date().toISOString(),
+        trucksCleared: 0
+      });
+    }
+
     const operations = [
       { sql: 'DELETE FROM truck_cargo', params: [] },
       { sql: 'DELETE FROM trucks', params: [] },
       { sql: 'UPDATE cargo SET status = ? WHERE status = ?', params: ['warehouse', 'shipped'] }
     ];
 
+    console.log('🔄 Executing database transaction...');
     await dbTransaction(operations);
     
-    console.log('All truck records cleared successfully');
+    const remainingTrucks = await dbGet('SELECT COUNT(*) as count FROM trucks');
+    console.log(`✅ All truck records cleared successfully. Remaining trucks: ${remainingTrucks.count}`);
+    
     res.json({ 
       message: 'All truck records cleared successfully', 
-      timestamp: new Date().toISOString()
+      timestamp: new Date().toISOString(),
+      trucksCleared: truckCount.count,
+      remainingTrucks: remainingTrucks.count
     });
   } catch (error) {
-    console.error('Error clearing truck records:', error);
+    console.error('❌ Error clearing truck records:', error);
     res.status(500).json({ 
       error: 'Failed to clear truck records',
-      details: error.message 
+      details: error.message,
+      code: error.code || 'UNKNOWN_ERROR',
+      timestamp: new Date().toISOString()
     });
   }
 });
