@@ -4,12 +4,13 @@ import sqlite3 from 'sqlite3';
 import { fileURLToPath } from 'url';
 import { dirname, join } from 'path';
 import fs from 'fs';
+import { createServer } from 'http';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
 
 const app = express();
-const PORT = process.env.PORT || 3001;
+const DEFAULT_PORT = process.env.PORT || 3001;
 
 // Enhanced CORS configuration for WebContainer
 app.use(cors({
@@ -721,52 +722,105 @@ app.use((err, req, res, next) => {
   res.status(500).json({ error: 'Something went wrong!' });
 });
 
-// Start server
-const server = app.listen(PORT, '0.0.0.0', () => {
-  console.log(`✅ Server running on port ${PORT}`);
-  console.log(`🌐 API available at http://localhost:${PORT}/api`);
-  console.log(`🔍 Health check: http://localhost:${PORT}/api/health`);
-});
+// Function to find an available port
+const findAvailablePort = (startPort, maxAttempts = 10) => {
+  return new Promise((resolve, reject) => {
+    let currentPort = startPort;
+    let attempts = 0;
 
-// Handle server startup errors
-server.on('error', (err) => {
-  console.error('❌ Server startup error:', err);
-  if (err.code === 'EADDRINUSE') {
-    console.error(`Port ${PORT} is already in use. Please try a different port.`);
-  }
-  process.exit(1);
-});
+    const tryPort = () => {
+      if (attempts >= maxAttempts) {
+        reject(new Error(`Could not find an available port after ${maxAttempts} attempts`));
+        return;
+      }
 
-// Graceful shutdown
-const gracefulShutdown = () => {
-  console.log('\n🔄 Shutting down server...');
-  server.close(() => {
-    console.log('🔌 HTTP server closed');
-    if (db) {
-      db.close((err) => {
-        if (err) {
-          console.error('❌ Error closing database:', err);
-        } else {
-          console.log('🗄️ Database connection closed');
-        }
-        process.exit(0);
+      const server = createServer();
+      
+      server.listen(currentPort, '0.0.0.0', () => {
+        server.close(() => {
+          resolve(currentPort);
+        });
       });
-    } else {
-      process.exit(0);
-    }
+
+      server.on('error', (err) => {
+        if (err.code === 'EADDRINUSE') {
+          console.log(`⚠️  Port ${currentPort} is in use, trying port ${currentPort + 1}...`);
+          currentPort++;
+          attempts++;
+          tryPort();
+        } else {
+          reject(err);
+        }
+      });
+    };
+
+    tryPort();
   });
 };
 
-process.on('SIGINT', gracefulShutdown);
-process.on('SIGTERM', gracefulShutdown);
+// Start server with dynamic port selection
+const startServer = async () => {
+  try {
+    const availablePort = await findAvailablePort(DEFAULT_PORT);
+    
+    const server = app.listen(availablePort, '0.0.0.0', () => {
+      console.log(`✅ Server running on port ${availablePort}`);
+      console.log(`🌐 API available at http://localhost:${availablePort}/api`);
+      console.log(`🔍 Health check: http://localhost:${availablePort}/api/health`);
+      
+      if (availablePort !== DEFAULT_PORT) {
+        console.log(`⚠️  Note: Using port ${availablePort} instead of ${DEFAULT_PORT} (port was in use)`);
+      }
+    });
 
-// Handle uncaught exceptions
-process.on('uncaughtException', (err) => {
-  console.error('❌ Uncaught Exception:', err);
-  gracefulShutdown();
-});
+    // Handle server startup errors
+    server.on('error', (err) => {
+      console.error('❌ Server startup error:', err);
+      if (err.code === 'EADDRINUSE') {
+        console.error(`Port ${availablePort} is already in use. This should not happen with dynamic port selection.`);
+      }
+      process.exit(1);
+    });
 
-process.on('unhandledRejection', (reason, promise) => {
-  console.error('❌ Unhandled Rejection at:', promise, 'reason:', reason);
-  gracefulShutdown();
-});
+    // Graceful shutdown
+    const gracefulShutdown = () => {
+      console.log('\n🔄 Shutting down server...');
+      server.close(() => {
+        console.log('🔌 HTTP server closed');
+        if (db) {
+          db.close((err) => {
+            if (err) {
+              console.error('❌ Error closing database:', err);
+            } else {
+              console.log('🗄️ Database connection closed');
+            }
+            process.exit(0);
+          });
+        } else {
+          process.exit(0);
+        }
+      });
+    };
+
+    process.on('SIGINT', gracefulShutdown);
+    process.on('SIGTERM', gracefulShutdown);
+
+    // Handle uncaught exceptions
+    process.on('uncaughtException', (err) => {
+      console.error('❌ Uncaught Exception:', err);
+      gracefulShutdown();
+    });
+
+    process.on('unhandledRejection', (reason, promise) => {
+      console.error('❌ Unhandled Rejection at:', promise, 'reason:', reason);
+      gracefulShutdown();
+    });
+
+  } catch (error) {
+    console.error('❌ Failed to start server:', error);
+    process.exit(1);
+  }
+};
+
+// Start the server
+startServer();
